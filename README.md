@@ -1,5 +1,9 @@
 # RADAE Decoder
 
+Originally from: https://github.com/peterbmarks/radae_decoder 
+
+Based on code from: https://github.com/drowe67/radae
+
 A real-time RADAE (Radio Autoencoder) decoder for Linux. Captures RADAE modem audio from an ALSA input device, decodes it using a neural OFDM demodulator and FARGAN vocoder, and plays the decoded speech on an ALSA output device. Includes a GTK3 level meter showing decoded audio levels, sync status, and SNR.
 
 ![Platform](https://img.shields.io/badge/Platform-Linux-blue) ![GTK3](https://img.shields.io/badge/GUI-GTK3-green) ![ALSA](https://img.shields.io/badge/Audio-ALSA-orange) ![RADAE](https://img.shields.io/badge/Codec-RADAE-purple)
@@ -56,7 +60,7 @@ sudo apt-get install build-essential cmake \
 ## Build Instructions
 
 ```bash
-cd SimpleDecoder
+cd radae_decoder
 
 mkdir -p build
 cd build
@@ -94,6 +98,9 @@ cmake ..
 5. **Meter display** -- Shows decoded output audio levels in real-time once synced.
 6. **Refresh button** -- Re-scan for devices if you plug in new hardware.
 
+The chosen input and output audio device names are saved and loaded on launch. If both are found
+decoding will automatically start.
+
 ### Permissions
 
 If you see "Failed to open audio devices", ensure your user is in the `audio` group:
@@ -108,7 +115,7 @@ sudo usermod -a -G audio $USER
 ### Code structure
 
 ```
-SimpleDecoder/
+radae_decoder/
 ├── CMakeLists.txt              # Top-level build (GTK, ALSA, radae_nopy)
 ├── README.md
 ├── src/
@@ -224,6 +231,7 @@ The neural network weight files (`rade_enc_data.c`, `rade_dec_data.c`) are ~24 M
 - Opus/LPCNet/FARGAN by Xiph.Org / Amazon ([opus-codec.org](https://opus-codec.org/))
 - Built with GTK 3 ([gtk.org](https://www.gtk.org/))
 - Audio I/O via ALSA ([alsa-project.org](https://www.alsa-project.org/))
+- Thanks David Rowe for help and encouragement.
 
 ---
 
