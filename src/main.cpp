@@ -50,7 +50,7 @@ static void stop_decoder()
 {
     if (g_decoder) { g_decoder->stop(); g_decoder->close(); }
     if (g_timer)   { g_source_remove(g_timer); g_timer = 0; }
-    if (g_meter)     meter_widget_update(g_meter, 0.f, 0.f);
+    if (g_meter)     meter_widget_update(g_meter, 0.f);
     if (g_spectrum)  spectrum_widget_update(g_spectrum, nullptr, 0, 8000.f);
     set_btn_state(false);
 }
@@ -60,11 +60,9 @@ static gboolean on_meter_tick(gpointer /*data*/)
 {
     if (!g_decoder || !g_decoder->is_running()) return TRUE;
 
-    /* update meter with decoded output level */
+    /* update meter with input level */
     if (g_meter)
-        meter_widget_update(g_meter,
-                            g_decoder->get_output_level_left(),
-                            g_decoder->get_output_level_right());
+        meter_widget_update(g_meter, g_decoder->get_input_level());
 
     /* update spectrum with input audio FFT */
     if (g_spectrum) {
@@ -278,13 +276,16 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     g_signal_connect(g_btn, "clicked", G_CALLBACK(on_start_stop), NULL);
     gtk_box_pack_start(GTK_BOX(vbox), g_btn, FALSE, FALSE, 0);
 
-    /* ── spectrum (input audio, fixed height) ──────────────────────── */
-    g_spectrum = spectrum_widget_new();
-    gtk_box_pack_start(GTK_BOX(vbox), g_spectrum, FALSE, FALSE, 0);
+    /* ── input meter + spectrum (side by side, expand vertically) ──── */
+    GtkWidget* meter_spec_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 
-    /* ── meter (expands to fill remaining vertical space) ─────────── */
     g_meter = meter_widget_new();
-    gtk_box_pack_start(GTK_BOX(vbox), g_meter, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(meter_spec_hbox), g_meter, FALSE, FALSE, 0);
+
+    g_spectrum = spectrum_widget_new();
+    gtk_box_pack_start(GTK_BOX(meter_spec_hbox), g_spectrum, TRUE, TRUE, 0);
+
+    gtk_box_pack_start(GTK_BOX(vbox), meter_spec_hbox, TRUE, TRUE, 0);
 
     /* ── status label ──────────────────────────────────────────────── */
     g_status = gtk_label_new("");

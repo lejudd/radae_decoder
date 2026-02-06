@@ -185,6 +185,7 @@ void RadaeDecoder::close()
     synced_       = false;
     snr_dB_       = 0.0f;
     freq_offset_  = 0.0f;
+    input_level_  = 0.0f;
     output_level_ = 0.0f;
 }
 
@@ -207,6 +208,7 @@ void RadaeDecoder::stop()
 
     if (thread_.joinable()) thread_.join();
 
+    input_level_  = 0.0f;
     output_level_ = 0.0f;
     synced_       = false;
 }
@@ -378,6 +380,16 @@ void RadaeDecoder::processing_loop()
                 std::lock_guard<std::mutex> lock(spectrum_mutex_);
                 std::memcpy(spectrum_mag_, tmp, sizeof(spectrum_mag_));
             }
+        }
+
+        /* ── input RMS level ──────────────────────────────────────────── */
+        {
+            double sum2 = 0.0;
+            for (int i = 0; i < nin; i++)
+                sum2 += static_cast<double>(acc_8k[static_cast<size_t>(i)])
+                      * static_cast<double>(acc_8k[static_cast<size_t>(i)]);
+            input_level_.store(std::sqrt(static_cast<float>(sum2 / nin)),
+                               std::memory_order_relaxed);
         }
 
         /* ── Hilbert transform: real 8 kHz → complex IQ ──────────────── */
