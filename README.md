@@ -14,7 +14,9 @@ A real-time RADAE (Radio Autoencoder) decoder for Linux. Captures RADAE modem au
 - **Dual device selection** — Pick any ALSA capture device (modem input) and playback device (decoded speech output)
 - **Automatic signal acquisition** — Searches for RADAE signal, locks on when found, re-acquires after signal loss
 - **Live status display** — Shows sync state, SNR (dB), and frequency offset (Hz) while decoding
-- **Audio level meter** — Calibrated dB scale (-60 to 0 dB) with peak hold, showing decoded output levels
+- **Input level meter** — Calibrated dB scale (-60 to 0 dB) with peak hold, showing input audio level
+- **Spectrum display** — Shows 4KHz of audio spectrum. With a RADAE signal you should see energy concentrated in the OFDM band around 1.3 kHz. 
+- **Output level meter** — Calibrated dB scale (-60 to 0 dB) with peak hold, showing decoded output levels
 - **Sample rate flexibility** — Accepts any ALSA-supported input/output rate; internally resamples to/from the 8 kHz modem and 16 kHz speech rates
 
 ## How it works
