@@ -10,7 +10,7 @@ AudioInput::~AudioInput() { stop(); close(); }
 
 /* ── device enumeration ─────────────────────────────────────────────────── */
 
-std::vector<AudioDevice> AudioInput::enumerate_devices()
+static std::vector<AudioDevice> enumerate_devices_by_stream(snd_pcm_stream_t stream)
 {
     std::vector<AudioDevice> devices;
 
@@ -39,10 +39,10 @@ std::vector<AudioDevice> AudioInput::enumerate_devices()
         while (snd_ctl_pcm_next_device(ctl, &device) >= 0 && device >= 0) {
             snd_pcm_info_set_device   (pcm_info, static_cast<unsigned>(device));
             snd_pcm_info_set_subdevice(pcm_info, 0);
-            snd_pcm_info_set_stream   (pcm_info, SND_PCM_STREAM_CAPTURE);
+            snd_pcm_info_set_stream   (pcm_info, stream);
 
             if (snd_ctl_pcm_info(ctl, pcm_info) < 0)
-                continue;                   // not a capture-capable device
+                continue;                   // device doesn't support this stream type
 
             AudioDevice ad;
             ad.name  = std::string(card_name ? card_name : "Unknown")
@@ -58,6 +58,16 @@ std::vector<AudioDevice> AudioInput::enumerate_devices()
         snd_ctl_close(ctl);
     }
     return devices;
+}
+
+std::vector<AudioDevice> AudioInput::enumerate_devices()
+{
+    return enumerate_devices_by_stream(SND_PCM_STREAM_CAPTURE);
+}
+
+std::vector<AudioDevice> AudioInput::enumerate_playback_devices()
+{
+    return enumerate_devices_by_stream(SND_PCM_STREAM_PLAYBACK);
 }
 
 /* ── open / close ───────────────────────────────────────────────────────── */

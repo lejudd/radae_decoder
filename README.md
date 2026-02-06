@@ -6,7 +6,9 @@ A real-time stereo audio level meter for Linux with GTK3 UI and ALSA capture bac
 
 ## Features
 
-- **Device enumeration** — Automatically discovers all ALSA capture devices (microphones, line-in, loopback, etc.)
+- **Dual device enumeration** — Automatically discovers both:
+  - ALSA **capture** devices (microphones, line-in, loopback inputs)
+  - ALSA **playback** devices (speakers, headphones, outputs)
 - **Stereo/mono support** — Handles stereo natively; duplicates mono across L+R channels
 - **Professional metering** — Calibrated dB scale (−60 to 0 dB) with color-coded gradient:
   - Deep green (low levels)
@@ -14,13 +16,14 @@ A real-time stereo audio level meter for Linux with GTK3 UI and ALSA capture bac
   - Amber → red (approaching 0 dB)
 - **Peak hold** — White peak indicator holds for ~1.5 seconds, then decays smoothly
 - **Low latency** — 512-frame periods (~11 ms @ 44.1 kHz) for responsive visual feedback
-- **Clean UI** — Minimal GTK3 interface with device dropdown, start/stop toggle, and refresh button
+- **Clean UI** — Minimal GTK3 interface with separate input/output device selectors, start/stop toggle, and refresh button
 
 ## Screenshots
 
 ```
 ┌─────────────────────────────────┐
-│ [Device Selector ▼]  [↻]        │
+│ Input:  [Device Selector ▼] [↻] │
+│ Output: [Device Selector ▼]     │
 │ [   Start   ]   (green button)  │
 │                                 │
 │  ┌─┐ ┌──────┐ ┌─┐              │
@@ -102,10 +105,11 @@ audio_level_meter
 
 ### First run
 
-1. **Device dropdown** — Lists all ALSA capture devices. Select your microphone or input source.
-2. **Start button** — Click to begin capturing audio. The button turns red and changes to "Stop".
-3. **Meter display** — Watch the stereo bars respond to audio in real-time.
-4. **Refresh button** (↻) — Re-scan for devices if you plug in new hardware.
+1. **Input dropdown** — Lists all ALSA capture devices. Select your microphone or input source.
+2. **Output dropdown** — Lists all ALSA playback devices for reference (playback monitoring not yet implemented).
+3. **Start button** — Click to begin capturing audio from the selected input. The button turns red and changes to "Stop".
+4. **Meter display** — Watch the stereo bars respond to audio in real-time.
+5. **Refresh button** (↻) — Re-scan for devices if you plug in new hardware.
 
 ### Permissions
 
@@ -134,9 +138,9 @@ SimpleDecoder/
 
 | Module | Responsibility |
 |--------|---------------|
-| **audio_input** | Wraps ALSA PCM API; enumerates capture devices; spawns a background thread that continuously reads audio frames and computes per-channel RMS levels (stored as `std::atomic<float>` for lock-free access) |
+| **audio_input** | Wraps ALSA PCM API; enumerates both capture and playback devices; spawns a background thread that continuously reads audio frames and computes per-channel RMS levels (stored as `std::atomic<float>` for lock-free access) |
 | **meter_widget** | Custom `GtkDrawingArea` widget; redraws at ~30 fps using Cairo; converts linear RMS → logarithmic dB position; applies green→red gradient; tracks peak-hold with decay logic |
-| **main** | GTK application shell; connects signals; manages device combo box; toggles capture on/off; updates meter via `g_timeout_add` timer |
+| **main** | GTK application shell; connects signals; manages dual device combo boxes (input/output); toggles capture on/off; updates meter via `g_timeout_add` timer |
 
 ### Audio pipeline
 
@@ -153,7 +157,7 @@ ALSA PCM device (hw:X,Y)
 
 ### Signal flow
 
-1. User selects device → `on_combo_changed()` → `start_capture(idx)`
+1. User selects input device → `on_input_combo_changed()` → `start_capture(idx)`
 2. `AudioInput::open(hw_id)` → configure ALSA (44.1 kHz, S16_LE, stereo/mono)
 3. `AudioInput::start()` → spawn `capture_loop()` thread
 4. Thread runs tight loop: `snd_pcm_readi()` → compute RMS → store atomics
@@ -238,6 +242,7 @@ if (current_level >= peak) {
 ## Roadmap
 
 Potential future enhancements:
+- [ ] **Playback monitoring** — Capture from ALSA loopback devices or PulseAudio monitor sources to meter output audio
 - [ ] VU meter mode (slower ballistics, −20 to +3 VU scale)
 - [ ] Peak clip indicator (stays red for N seconds when 0 dB hit)
 - [ ] Configurable sample rate and buffer sizes (via UI or config file)

@@ -21,7 +21,8 @@ public:
     ~AudioInput();
 
     /* device list ---------------------------------------------------------- */
-    static std::vector<AudioDevice> enumerate_devices();
+    static std::vector<AudioDevice> enumerate_devices();           // capture devices
+    static std::vector<AudioDevice> enumerate_playback_devices();  // playback devices
 
     /* lifecycle ------------------------------------------------------------ */
     bool open(const std::string& hw_id);   // configure + prepare
