@@ -127,7 +127,7 @@ bool RadaeDecoder::open(const std::string& input_hw_id,
     /* ── ALSA capture (mono, prefer 8 kHz) ──────────────────────────── */
     rate_in_ = RADE_FS;
     if (!open_alsa(&pcm_in_, input_hw_id, SND_PCM_STREAM_CAPTURE,
-                   &rate_in_, 512, 2048))
+                   &rate_in_, 1024, 8192))
         return false;
 
     /* ── ALSA playback (mono, prefer 16 kHz) ────────────────────────── */
@@ -334,7 +334,7 @@ void RadaeDecoder::processing_loop()
             if (n < 0) {
                 if (!running_.load(std::memory_order_relaxed)) break;
                 if (n == -EINTR) continue;
-                n = snd_pcm_recover(pcm_in_, static_cast<int>(n), 0);
+                n = snd_pcm_recover(pcm_in_, static_cast<int>(n), 1);
                 if (n < 0) { running_ = false; break; }
                 continue;
             }
@@ -484,7 +484,7 @@ void RadaeDecoder::processing_loop()
                                              static_cast<snd_pcm_uframes_t>(remaining));
                     if (written < 0) {
                         written = snd_pcm_recover(pcm_out_,
-                                                  static_cast<int>(written), 0);
+                                                  static_cast<int>(written), 1);
                         if (written < 0) break;
                         continue;
                     }
