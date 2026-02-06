@@ -67,7 +67,7 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 # and take a while to compile.
 make -j$(nproc)
 
-# Binary is now at: build/audio_level_meter
+# Binary is now at: build/radae_decoder
 ```
 
 ### Environment quirks
@@ -82,7 +82,7 @@ cmake ..
 ## Usage
 
 ```bash
-./build/audio_level_meter
+./build/radae_decoder
 ```
 
 ### First run
