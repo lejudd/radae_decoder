@@ -8,6 +8,12 @@ A real-time RADAE (Radio Autoencoder) decoder for Linux. Captures RADAE modem au
 
 ![Platform](https://img.shields.io/badge/Platform-Linux-blue) ![GTK3](https://img.shields.io/badge/GUI-GTK3-green) ![ALSA](https://img.shields.io/badge/Audio-ALSA-orange) ![RADAE](https://img.shields.io/badge/Codec-RADAE-purple)
 
+
+![Screenshot](screenshot.png)
+
+[Video demo](https://youtu.be/Q1SExfmMqZ0?si=LSMlgETFaZ1H1Fn5)
+
+
 ## Features
 
 - **Real-time RADAE decoding** — Full receive pipeline: Hilbert transform, OFDM demodulation, neural decoder, FARGAN speech synthesis
