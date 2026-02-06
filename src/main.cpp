@@ -16,7 +16,8 @@ static std::vector<AudioDevice> g_output_devices;
 static GtkWidget*               g_input_combo        = nullptr;   // input device selector
 static GtkWidget*               g_output_combo       = nullptr;   // output device selector
 static GtkWidget*               g_btn                = nullptr;   // start / stop
-static GtkWidget*               g_meter              = nullptr;   // bar-meter widget
+static GtkWidget*               g_meter_in           = nullptr;   // input level meter
+static GtkWidget*               g_meter_out          = nullptr;   // output level meter
 static GtkWidget*               g_spectrum           = nullptr;   // spectrum widget
 static GtkWidget*               g_status             = nullptr;   // status label
 static guint                    g_timer              = 0;         // meter update timer
@@ -50,7 +51,8 @@ static void stop_decoder()
 {
     if (g_decoder) { g_decoder->stop(); g_decoder->close(); }
     if (g_timer)   { g_source_remove(g_timer); g_timer = 0; }
-    if (g_meter)     meter_widget_update(g_meter, 0.f);
+    if (g_meter_in)  meter_widget_update(g_meter_in, 0.f);
+    if (g_meter_out) meter_widget_update(g_meter_out, 0.f);
     if (g_spectrum)  spectrum_widget_update(g_spectrum, nullptr, 0, 8000.f);
     set_btn_state(false);
 }
@@ -60,9 +62,11 @@ static gboolean on_meter_tick(gpointer /*data*/)
 {
     if (!g_decoder || !g_decoder->is_running()) return TRUE;
 
-    /* update meter with input level */
-    if (g_meter)
-        meter_widget_update(g_meter, g_decoder->get_input_level());
+    /* update level meters */
+    if (g_meter_in)
+        meter_widget_update(g_meter_in, g_decoder->get_input_level());
+    if (g_meter_out)
+        meter_widget_update(g_meter_out, g_decoder->get_output_level_left());
 
     /* update spectrum with input audio FFT */
     if (g_spectrum) {
@@ -276,14 +280,17 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     g_signal_connect(g_btn, "clicked", G_CALLBACK(on_start_stop), NULL);
     gtk_box_pack_start(GTK_BOX(vbox), g_btn, FALSE, FALSE, 0);
 
-    /* ── input meter + spectrum (side by side, expand vertically) ──── */
+    /* ── input meter + spectrum + output meter (side by side) ────────── */
     GtkWidget* meter_spec_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 
-    g_meter = meter_widget_new();
-    gtk_box_pack_start(GTK_BOX(meter_spec_hbox), g_meter, FALSE, FALSE, 0);
+    g_meter_in = meter_widget_new();
+    gtk_box_pack_start(GTK_BOX(meter_spec_hbox), g_meter_in, FALSE, FALSE, 0);
 
     g_spectrum = spectrum_widget_new();
     gtk_box_pack_start(GTK_BOX(meter_spec_hbox), g_spectrum, TRUE, TRUE, 0);
+
+    g_meter_out = meter_widget_new();
+    gtk_box_pack_start(GTK_BOX(meter_spec_hbox), g_meter_out, FALSE, FALSE, 0);
 
     gtk_box_pack_start(GTK_BOX(vbox), meter_spec_hbox, TRUE, TRUE, 0);
 
