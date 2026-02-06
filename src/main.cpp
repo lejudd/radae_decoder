@@ -1,13 +1,15 @@
 #include <gtk/gtk.h>
 #include <vector>
 #include <string>
+#include <cstdio>
 
 #include "audio_input.h"
 #include "meter_widget.h"
+#include "rade_decoder.h"
 
 /* ── globals (single-window app) ────────────────────────────────────────── */
 
-static AudioInput*              g_audio              = nullptr;
+static RadaeDecoder*            g_decoder            = nullptr;
 static std::vector<AudioDevice> g_input_devices;
 static std::vector<AudioDevice> g_output_devices;
 static GtkWidget*               g_input_combo        = nullptr;   // input device selector
@@ -40,88 +42,107 @@ static void set_btn_state(bool capturing)
     }
 }
 
-/* ── capture control ────────────────────────────────────────────────────── */
+/* ── decoder control ───────────────────────────────────────────────────── */
 
-static void stop_capture()
+static void stop_decoder()
 {
-    if (g_audio) { g_audio->stop(); g_audio->close(); }
-    if (g_timer) { g_source_remove(g_timer); g_timer = 0; }
-    if (g_meter) meter_widget_update(g_meter, 0.f, 0.f);
+    if (g_decoder) { g_decoder->stop(); g_decoder->close(); }
+    if (g_timer)   { g_source_remove(g_timer); g_timer = 0; }
+    if (g_meter)   meter_widget_update(g_meter, 0.f, 0.f);
     set_btn_state(false);
 }
 
-/* timer tick – feed the meter at ~30 fps */
+/* timer tick – update meter + status at ~30 fps */
 static gboolean on_meter_tick(gpointer /*data*/)
 {
-    if (g_audio && g_audio->is_running() && g_meter)
+    if (!g_decoder || !g_decoder->is_running()) return TRUE;
+
+    /* update meter with decoded output level */
+    if (g_meter)
         meter_widget_update(g_meter,
-                            g_audio->get_level_left(),
-                            g_audio->get_level_right());
+                            g_decoder->get_output_level_left(),
+                            g_decoder->get_output_level_right());
+
+    /* update status with sync info */
+    if (g_decoder->is_synced()) {
+        char buf[128];
+        std::snprintf(buf, sizeof buf,
+                      "Synced \xe2\x80\x94 SNR: %.0f dB  Freq: %+.1f Hz",
+                      static_cast<double>(g_decoder->snr_dB()),
+                      static_cast<double>(g_decoder->freq_offset()));
+        set_status(buf);
+    } else {
+        set_status("Searching for signal\xe2\x80\xa6");
+    }
+
     return TRUE;
 }
 
-static void start_capture(int idx)
+static void start_decoder(int in_idx, int out_idx)
 {
-    if (idx < 0 || idx >= static_cast<int>(g_input_devices.size())) return;
+    if (in_idx  < 0 || in_idx  >= static_cast<int>(g_input_devices.size()))  return;
+    if (out_idx < 0 || out_idx >= static_cast<int>(g_output_devices.size())) return;
 
-    stop_capture();
+    stop_decoder();
 
-    if (!g_audio) g_audio = new AudioInput();
+    if (!g_decoder) g_decoder = new RadaeDecoder();
 
-    if (!g_audio->open(g_input_devices[idx].hw_id)) {
-        set_status("Failed to open device \xe2\x80\x94 "
-                   "check you are in the 'audio' group "
-                   "(sudo usermod -a -G audio <you>).");
+    if (!g_decoder->open(g_input_devices[in_idx].hw_id,
+                         g_output_devices[out_idx].hw_id)) {
+        set_status("Failed to open audio devices.");
         set_btn_state(false);
         return;
     }
 
-    g_audio->start();
+    g_decoder->start();
     set_btn_state(true);
-
-    set_status(g_audio->channels() == 1
-               ? "Capturing (mono \xe2\x86\x92 duplicated L & R)\xe2\x80\xa6"
-               : "Capturing (stereo)\xe2\x80\xa6");
-
+    set_status("Searching for signal\xe2\x80\xa6");
     g_timer = g_timeout_add(33, on_meter_tick, nullptr);   // ~30 fps
 }
 
 /* ── signal handlers ────────────────────────────────────────────────────── */
 
-/* selecting an input device auto-starts capture */
+/* selecting an input device: auto-start if output is also selected */
 static void on_input_combo_changed(GtkComboBox* combo, gpointer /*data*/)
 {
     if (g_updating_combos) return;
-    start_capture(gtk_combo_box_get_active(combo));
+    int in_idx  = gtk_combo_box_get_active(combo);
+    int out_idx = gtk_combo_box_get_active(GTK_COMBO_BOX(g_output_combo));
+    if (in_idx >= 0 && out_idx >= 0)
+        start_decoder(in_idx, out_idx);
 }
 
-/* selecting an output device shows info (playback monitoring not yet implemented) */
+/* selecting an output device: auto-start if input is also selected */
 static void on_output_combo_changed(GtkComboBox* combo, gpointer /*data*/)
 {
     if (g_updating_combos) return;
-    int idx = gtk_combo_box_get_active(combo);
-    if (idx >= 0 && idx < static_cast<int>(g_output_devices.size())) {
-        std::string msg = "Output device selected: " + g_output_devices[idx].name
-                        + " (playback monitoring not yet implemented)";
-        set_status(msg.c_str());
-    }
+    int out_idx = gtk_combo_box_get_active(combo);
+    int in_idx  = gtk_combo_box_get_active(GTK_COMBO_BOX(g_input_combo));
+    if (in_idx >= 0 && out_idx >= 0)
+        start_decoder(in_idx, out_idx);
 }
 
 /* start / stop toggle */
 static void on_start_stop(GtkButton* /*btn*/, gpointer /*data*/)
 {
-    if (g_audio && g_audio->is_running()) {
-        stop_capture();
+    if (g_decoder && g_decoder->is_running()) {
+        stop_decoder();
         set_status("Stopped.");
     } else {
-        start_capture(gtk_combo_box_get_active(GTK_COMBO_BOX(g_input_combo)));
+        int in_idx  = gtk_combo_box_get_active(GTK_COMBO_BOX(g_input_combo));
+        int out_idx = gtk_combo_box_get_active(GTK_COMBO_BOX(g_output_combo));
+        if (in_idx < 0 || out_idx < 0) {
+            set_status("Select both input and output devices first.");
+            return;
+        }
+        start_decoder(in_idx, out_idx);
     }
 }
 
 /* refresh the device lists */
 static void on_refresh(GtkButton* /*btn*/, gpointer /*data*/)
 {
-    if (g_audio && g_audio->is_running()) stop_capture();
+    if (g_decoder && g_decoder->is_running()) stop_decoder();
 
     g_input_devices  = AudioInput::enumerate_devices();
     g_output_devices = AudioInput::enumerate_playback_devices();
@@ -144,14 +165,14 @@ static void on_refresh(GtkButton* /*btn*/, gpointer /*data*/)
 
     set_status(g_input_devices.empty()
                ? "No audio input devices found."
-               : "Select an input device above.");
+               : "Select input and output devices above.");
 }
 
 /* clean up before the window disappears */
 static void on_window_destroy(GtkWidget* /*w*/, gpointer /*data*/)
 {
-    if (g_timer) { g_source_remove(g_timer); g_timer = 0; }
-    if (g_audio) { g_audio->stop(); g_audio->close(); delete g_audio; g_audio = nullptr; }
+    if (g_timer)   { g_source_remove(g_timer); g_timer = 0; }
+    if (g_decoder) { g_decoder->stop(); g_decoder->close(); delete g_decoder; g_decoder = nullptr; }
 }
 
 /* ── UI construction ────────────────────────────────────────────────────── */
@@ -189,7 +210,7 @@ static void activate(GtkApplication* app, gpointer /*data*/)
 
     /* ── window ────────────────────────────────────────────────────── */
     GtkWidget* window = gtk_application_window_new(app);
-    gtk_window_set_title         (GTK_WINDOW(window), "Audio Level Meter");
+    gtk_window_set_title         (GTK_WINDOW(window), "RADAE Decoder");
     gtk_window_set_default_size  (GTK_WINDOW(window), 300, 480);
     gtk_window_set_resizable     (GTK_WINDOW(window), TRUE);
     g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), NULL);
@@ -208,7 +229,7 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     gtk_box_pack_start(GTK_BOX(input_hbox), input_label, FALSE, FALSE, 0);
 
     g_input_combo = gtk_combo_box_text_new();
-    gtk_widget_set_tooltip_text(g_input_combo, "Audio input devices (capture)");
+    gtk_widget_set_tooltip_text(g_input_combo, "Audio input (RADAE modem signal)");
     g_signal_connect(g_input_combo, "changed", G_CALLBACK(on_input_combo_changed), NULL);
     gtk_box_pack_start(GTK_BOX(input_hbox), g_input_combo, TRUE, TRUE, 0);
 
@@ -228,7 +249,7 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     gtk_box_pack_start(GTK_BOX(output_hbox), output_label, FALSE, FALSE, 0);
 
     g_output_combo = gtk_combo_box_text_new();
-    gtk_widget_set_tooltip_text(g_output_combo, "Audio output devices (playback)");
+    gtk_widget_set_tooltip_text(g_output_combo, "Audio output (decoded speech)");
     g_signal_connect(g_output_combo, "changed", G_CALLBACK(on_output_combo_changed), NULL);
     gtk_box_pack_start(GTK_BOX(output_hbox), g_output_combo, TRUE, TRUE, 0);
 
@@ -265,7 +286,7 @@ static void activate(GtkApplication* app, gpointer /*data*/)
 
 int main(int argc, char* argv[])
 {
-    GtkApplication* app = gtk_application_new("org.simpledecoder.AudioLevelMeter",
+    GtkApplication* app = gtk_application_new("org.simpledecoder.RADAEDecoder",
                                               G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
 

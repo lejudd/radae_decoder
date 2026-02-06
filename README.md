@@ -1,48 +1,31 @@
-# Audio Level Meter
+# RADAE Decoder
 
-A real-time stereo audio level meter for Linux with GTK3 UI and ALSA capture backend.
+A real-time RADAE (Radio Autoencoder) decoder for Linux. Captures RADAE modem audio from an ALSA input device, decodes it using a neural OFDM demodulator and FARGAN vocoder, and plays the decoded speech on an ALSA output device. Includes a GTK3 level meter showing decoded audio levels, sync status, and SNR.
 
-![Audio Level Meter](https://img.shields.io/badge/Platform-Linux-blue) ![GTK3](https://img.shields.io/badge/GUI-GTK3-green) ![ALSA](https://img.shields.io/badge/Audio-ALSA-orange)
+![Platform](https://img.shields.io/badge/Platform-Linux-blue) ![GTK3](https://img.shields.io/badge/GUI-GTK3-green) ![ALSA](https://img.shields.io/badge/Audio-ALSA-orange) ![RADAE](https://img.shields.io/badge/Codec-RADAE-purple)
 
 ## Features
 
-- **Dual device enumeration** — Automatically discovers both:
-  - ALSA **capture** devices (microphones, line-in, loopback inputs)
-  - ALSA **playback** devices (speakers, headphones, outputs)
-- **Stereo/mono support** — Handles stereo natively; duplicates mono across L+R channels
-- **Professional metering** — Calibrated dB scale (−60 to 0 dB) with color-coded gradient:
-  - Deep green (low levels)
-  - Bright green → yellow-green → yellow (mid levels)
-  - Amber → red (approaching 0 dB)
-- **Peak hold** — White peak indicator holds for ~1.5 seconds, then decays smoothly
-- **Low latency** — 512-frame periods (~11 ms @ 44.1 kHz) for responsive visual feedback
-- **Clean UI** — Minimal GTK3 interface with separate input/output device selectors, start/stop toggle, and refresh button
+- **Real-time RADAE decoding** — Full receive pipeline: Hilbert transform, OFDM demodulation, neural decoder, FARGAN speech synthesis
+- **Dual device selection** — Pick any ALSA capture device (modem input) and playback device (decoded speech output)
+- **Automatic signal acquisition** — Searches for RADAE signal, locks on when found, re-acquires after signal loss
+- **Live status display** — Shows sync state, SNR (dB), and frequency offset (Hz) while decoding
+- **Audio level meter** — Calibrated dB scale (-60 to 0 dB) with peak hold, showing decoded output levels
+- **Sample rate flexibility** — Accepts any ALSA-supported input/output rate; internally resamples to/from the 8 kHz modem and 16 kHz speech rates
 
-## Screenshots
+## How it works
 
 ```
-┌─────────────────────────────────┐
-│ Input:  [Device Selector ▼] [↻] │
-│ Output: [Device Selector ▼]     │
-│ [   Start   ]   (green button)  │
-│                                 │
-│  ┌─┐ ┌──────┐ ┌─┐              │
-│  │L│ │  0   │ │R│              │
-│  │ │ │ -6   │ │ │              │
-│  │█│ │-12   │ │█│  ← gradient  │
-│  │█│ │-18   │ │█│    bars      │
-│  │█│ │-24   │ │█│              │
-│  │█│ │-30   │ │ │              │
-│  │ │ │-36   │ │ │              │
-│  │ │ │-42   │ │ │              │
-│  │ │ │-48   │ │ │              │
-│  │ │ │-54   │ │ │              │
-│  │ │ │-60   │ │ │              │
-│  └─┘ └──────┘ └─┘              │
-│                                 │
-│  Capturing (stereo)…            │
-└─────────────────────────────────┘
+ALSA Input (any rate, mono)
+  -> Resample to 8 kHz
+  -> Hilbert transform (127-tap FIR) -> complex IQ
+  -> RADE receiver (pilot acquisition, OFDM demod, neural decoder)
+  -> FARGAN vocoder -> 16 kHz mono speech
+  -> Resample to output device rate
+  -> ALSA Output
 ```
+
+The RADAE codec uses a 30-carrier OFDM waveform in ~1.3 kHz bandwidth. Each 120 ms modem frame produces 12 speech frames (10 ms each) via the neural decoder and FARGAN vocoder. Pilot symbols enable automatic frequency and timing synchronization.
 
 ## Requirements
 
@@ -53,31 +36,35 @@ A real-time stereo audio level meter for Linux with GTK3 UI and ALSA capture bac
 - X11 or Wayland display server
 
 ### Build-time
-- CMake 3.10+
+- CMake 3.16+
 - C++17 compiler (GCC 7+, Clang 5+)
+- C11 compiler
+- Internet connection (first build downloads and compiles Opus with FARGAN/LPCNet support)
+- Autotools (`autoconf`, `automake`, `libtool`) for building Opus
 - Development headers:
-  - `libgtk-3-dev` (GTK3 headers + pkg-config)
-  - `libasound2-dev` (ALSA headers)
+  - `libgtk-3-dev`
+  - `libasound2-dev`
   - `libcairo2-dev` (usually pulled in by GTK3)
 
 ### Install dependencies (Debian/Ubuntu)
 ```bash
 sudo apt-get install build-essential cmake \
-  libgtk-3-dev libasound2-dev pkg-config
+  libgtk-3-dev libasound2-dev pkg-config \
+  autoconf automake libtool
 ```
 
 ## Build Instructions
 
 ```bash
-# Clone or navigate to the project directory
 cd SimpleDecoder
 
-# Configure with CMake
 mkdir -p build
 cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 
-# Compile (parallel build with all cores)
+# First build downloads Opus (~175 MB) and compiles everything.
+# The NN weight files (rade_enc_data.c, rade_dec_data.c) are ~47 MB
+# and take a while to compile.
 make -j$(nproc)
 
 # Binary is now at: build/audio_level_meter
@@ -85,7 +72,7 @@ make -j$(nproc)
 
 ### Environment quirks
 
-On some systems, pkg-config can't find `.pc` files in `/usr/lib/x86_64-linux-gnu/pkgconfig`. The CMakeLists.txt handles this automatically by setting `PKG_CONFIG_PATH`, but if you encounter issues, manually export:
+On some systems, pkg-config can't find `.pc` files in `/usr/lib/x86_64-linux-gnu/pkgconfig`. The CMakeLists.txt handles this automatically, but if you encounter issues:
 
 ```bash
 export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig
@@ -95,25 +82,21 @@ cmake ..
 ## Usage
 
 ```bash
-# From the build directory
-./audio_level_meter
-
-# Or install system-wide (optional)
-sudo make install
-audio_level_meter
+./build/audio_level_meter
 ```
 
 ### First run
 
-1. **Input dropdown** — Lists all ALSA capture devices. Select your microphone or input source.
-2. **Output dropdown** — Lists all ALSA playback devices for reference (playback monitoring not yet implemented).
-3. **Start button** — Click to begin capturing audio from the selected input. The button turns red and changes to "Stop".
-4. **Meter display** — Watch the stereo bars respond to audio in real-time.
-5. **Refresh button** (↻) — Re-scan for devices if you plug in new hardware.
+1. **Input dropdown** -- Select the ALSA capture device receiving the RADAE modem signal (e.g. a sound card connected to a radio receiver).
+2. **Output dropdown** -- Select the ALSA playback device for decoded speech (e.g. speakers or headphones).
+3. **Start button** -- Click to begin decoding. The button turns red and changes to "Stop".
+4. **Status bar** -- Shows "Searching for signal..." until a RADAE signal is detected, then displays "Synced -- SNR: X dB  Freq: +Y Hz".
+5. **Meter display** -- Shows decoded output audio levels in real-time once synced.
+6. **Refresh button** -- Re-scan for devices if you plug in new hardware.
 
 ### Permissions
 
-If you see "Failed to open device", ensure your user is in the `audio` group:
+If you see "Failed to open audio devices", ensure your user is in the `audio` group:
 
 ```bash
 sudo usermod -a -G audio $USER
@@ -126,143 +109,122 @@ sudo usermod -a -G audio $USER
 
 ```
 SimpleDecoder/
-├── CMakeLists.txt           # Build configuration
-├── README.md                # This file
-└── src/
-    ├── main.cpp             # GTK application, UI setup, event handlers
-    ├── audio_input.h/cpp    # ALSA device enumeration & capture thread
-    └── meter_widget.h/cpp   # Cairo-based stereo bar meter widget
+├── CMakeLists.txt              # Top-level build (GTK, ALSA, radae_nopy)
+├── README.md
+├── src/
+│   ├── main.cpp                # GTK application, UI, event handlers
+│   ├── rade_decoder.h/cpp      # RADAE decode pipeline (capture -> decode -> playback)
+│   ├── audio_input.h/cpp       # ALSA device enumeration
+│   └── meter_widget.h/cpp      # Cairo-based stereo bar meter widget
+└── radae_nopy/                 # RADAE codec library (C, builds librade + opus)
+    ├── CMakeLists.txt
+    ├── cmake/BuildOpus.cmake   # Downloads & builds Opus with FARGAN/LPCNet
+    └── src/
+        ├── rade_api.h          # Public C API
+        ├── rade_rx.c           # Receiver (sync state machine, OFDM demod)
+        ├── rade_enc/dec*.c     # Neural encoder/decoder + compiled weights
+        ├── rade_ofdm.c         # OFDM modulation/demodulation
+        ├── rade_acq.c          # Pilot acquisition & tracking
+        └── ...
 ```
 
 ### Component overview
 
 | Module | Responsibility |
 |--------|---------------|
-| **audio_input** | Wraps ALSA PCM API; enumerates both capture and playback devices; spawns a background thread that continuously reads audio frames and computes per-channel RMS levels (stored as `std::atomic<float>` for lock-free access) |
-| **meter_widget** | Custom `GtkDrawingArea` widget; redraws at ~30 fps using Cairo; converts linear RMS → logarithmic dB position; applies green→red gradient; tracks peak-hold with decay logic |
-| **main** | GTK application shell; connects signals; manages dual device combo boxes (input/output); toggles capture on/off; updates meter via `g_timeout_add` timer |
+| **rade_decoder** | Complete real-time decode pipeline: ALSA capture, resampling (any rate to 8 kHz), Hilbert transform (real to IQ), RADE receiver, FARGAN vocoder synthesis, resampling (16 kHz to output rate), ALSA playback. Runs on a dedicated thread with atomic status variables. |
+| **audio_input** | ALSA device enumeration (capture and playback devices) via `snd_card_next()` / `snd_ctl_pcm_next_device()` |
+| **meter_widget** | Custom `GtkDrawingArea` widget; redraws at ~30 fps using Cairo; converts linear RMS to logarithmic dB; green-to-red gradient fill; peak-hold with decay |
+| **main** | GTK application shell; connects signals; manages device combo boxes; starts/stops decoder; updates meter and status via GLib timer |
+| **radae_nopy (librade)** | RADAE codec C library: OFDM mod/demod, pilot acquisition, neural encoder/decoder (GRU+Conv), bandpass filter. Neural network weights compiled directly into the binary (~47 MB). |
 
-### Audio pipeline
+### Decode pipeline
 
 ```
-ALSA PCM device (hw:X,Y)
-  ↓ snd_pcm_readi() — blocking read of 512 frames (S16_LE, interleaved)
-  ↓ Per-channel RMS calculation (√(Σ(sample²) / N))
-  ↓ std::atomic<float> level_left, level_right
-  ↓ [lock-free handoff]
-  ↓ GLib timer callback (33 ms / ~30 Hz)
-  ↓ meter_widget_update() — peak-hold logic, queue GTK redraw
-  ↓ Cairo draw callback — dB scale, gradient fill, peak line
+ALSA Input (hw:X,Y)
+  | snd_pcm_readi() -- blocking read, S16_LE mono
+  v
+Linear interpolation resample (input rate -> 8 kHz)
+  v
+Hilbert transform (127-tap Hamming-windowed FIR)
+  -> RADE_COMP (complex IQ samples)
+  v
+rade_rx() -- pilot acquisition, OFDM demod, neural decoder
+  -> 36-float feature vectors (12 per modem frame, when synced)
+  v
+FARGAN vocoder (fargan_synthesize)
+  -> 160 float samples per frame @ 16 kHz (10 ms)
+  v
+Linear interpolation resample (16 kHz -> output rate)
+  v
+snd_pcm_writei() -- ALSA playback, S16_LE mono
 ```
 
-### Signal flow
+### Sync state machine
 
-1. User selects input device → `on_input_combo_changed()` → `start_capture(idx)`
-2. `AudioInput::open(hw_id)` → configure ALSA (44.1 kHz, S16_LE, stereo/mono)
-3. `AudioInput::start()` → spawn `capture_loop()` thread
-4. Thread runs tight loop: `snd_pcm_readi()` → compute RMS → store atomics
-5. Main thread: `g_timeout_add(33 ms)` → `on_meter_tick()` → read atomics → `meter_widget_update()`
-6. GTK: `gtk_widget_queue_draw()` → `on_draw()` → Cairo rendering
+The RADE receiver has three states:
+
+1. **SEARCH** -- Correlates incoming signal against pilot patterns across 40 frequency bins (+-100 Hz range, 2.5 Hz steps)
+2. **CANDIDATE** -- Validates detected signal over multiple frames, refines timing and frequency
+3. **SYNC** -- Locked and demodulating. Continuously tracks pilots. Loses sync if pilots fail for 3 seconds.
+
+When sync is lost, the FARGAN vocoder is re-initialized so it can warm up cleanly when the next signal is acquired (5-frame warm-up via `fargan_cont()`).
+
+### Thread model
+
+- **Processing thread** (RadaeDecoder): Runs the entire capture-decode-playback loop
+- **GTK main thread**: Reads atomic status variables at 30 Hz, updates meter and status label
+- **Synchronization**: `std::atomic<float>` / `std::atomic<bool>` with relaxed ordering (lock-free)
 
 ## Troubleshooting
 
 ### "Package 'gtk+-3.0' not found"
-Your pkg-config search path is missing the multiarch directory. The CMakeLists.txt should handle this, but you can manually fix:
+Your pkg-config search path is missing the multiarch directory:
 ```bash
 export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig
 ```
 
-### "alsa/alsa.h: No such file or directory"
-The ALSA headers use `alsa/asoundlib.h` as the main include (not `alsa/alsa.h`). This project already uses the correct header. If you see this error, ensure `libasound2-dev` is installed.
-
-### "Failed to open device"
+### "Failed to open audio devices"
 - Check permissions: `groups` should list `audio`. If not: `sudo usermod -a -G audio $USER` and re-login.
-- Verify the device exists: `arecord -l` lists capture devices.
-- Try a different device from the dropdown.
+- Verify devices exist: `arecord -l` (capture) and `aplay -l` (playback).
+- Try different devices from the dropdowns.
 
-### Window doesn't appear
-Ensure you're running on a display server (X11/Wayland) with `$DISPLAY` set. Test GTK is working: `gtk3-demo`.
+### No audio output / stuck on "Searching for signal..."
+- Ensure the input device is actually receiving a RADAE modem signal at the expected bandwidth (~1.3 kHz around baseband).
+- Check that the input level is reasonable (not clipping, not too quiet).
+- The signal must contain RADAE OFDM pilots for the receiver to lock on.
 
-### Choppy or delayed meter response
-The default buffer/period sizes target ~11 ms latency. If your system can't sustain this:
-- Edit [audio_input.cpp:98-99](src/audio_input.cpp#L98-L99) and increase `period` to 1024 or 2048.
-- Rebuild: `make -j$(nproc)`
+### Build fails downloading Opus
+The first build downloads Opus source from GitHub (~175 MB). Ensure you have an internet connection. If behind a proxy, set `http_proxy`/`https_proxy` environment variables.
 
-## Configuration
-
-Most settings are baked into the source. To customize:
-
-| Setting | File | Line(s) |
-|---------|------|---------|
-| Audio format | [audio_input.cpp](src/audio_input.cpp) | 76-94 (S16_LE, 44.1 kHz, stereo) |
-| Period/buffer size | [audio_input.cpp](src/audio_input.cpp) | 98-101 (512 / 2048 frames) |
-| Meter update rate | [main.cpp](src/main.cpp) | 78 (`g_timeout_add(33 ms)` ≈ 30 Hz) |
-| dB range | [meter_widget.cpp](src/meter_widget.cpp) | 15-16 (−60 to 0 dB) |
-| Peak hold time | [meter_widget.cpp](src/meter_widget.cpp) | 13 (45 frames @ 30 Hz ≈ 1.5 s) |
-| Color gradient stops | [meter_widget.cpp](src/meter_widget.cpp) | 82-89 (green → red) |
-| Window size | [main.cpp](src/main.cpp) | 169 (300×480 px) |
-
-After changes, rebuild with `make -j$(nproc)`.
+### Build takes a long time
+The neural network weight files (`rade_enc_data.c`, `rade_dec_data.c`) are ~24 MB and ~23 MB respectively. Compiling these takes significant time and memory. Use `make -j$(nproc)` for parallel builds.
 
 ## Technical details
 
+### RADAE modem parameters
+- **Sample rate**: 8000 Hz (modem), 16000 Hz (speech)
+- **OFDM carriers**: 30
+- **Bandwidth**: ~1.3 kHz
+- **Modem frame**: 960 samples @ 8 kHz (120 ms)
+- **Latent dimension**: 80 (neural autoencoder bottleneck)
+- **Feature frames per modem frame**: 12 (3 latent vectors x 4 encoder stride)
+- **Speech frame**: 160 samples @ 16 kHz (10 ms)
+
 ### ALSA configuration
-- **Access mode**: `SND_PCM_ACCESS_RW_INTERLEAVED` (simplest API)
-- **Format**: `SND_PCM_FORMAT_S16_LE` (16-bit signed little-endian)
-- **Sample rate**: 44100 Hz (CD quality)
-- **Channels**: 2 (stereo preferred), falls back to 1 (mono duplicated)
-- **Periods**: 512 frames (~11.6 ms @ 44.1 kHz)
-- **Buffer**: 2048 frames (~46.4 ms total latency)
-
-### RMS to dB conversion
-```cpp
-float rms = sqrt(sum_of_squares / num_samples);  // linear amplitude (0..1)
-float db = 20 * log10(rms);                      // convert to dB
-float pos = (db - DB_MIN) / (DB_MAX - DB_MIN);   // map −60..0 dB → 0..1
-```
-
-### Peak-hold algorithm
-```cpp
-if (current_level >= peak) {
-    peak = current_level;
-    hold_timer = PEAK_HOLD;  // 45 frames
-} else {
-    if (hold_timer > 0) {
-        hold_timer--;
-    } else {
-        peak *= PEAK_DECAY;  // 0.925 per frame → ~10% decay/sec
-    }
-}
-```
-
-### Thread safety
-- Capture thread writes to `std::atomic<float>` (relaxed ordering)
-- GTK main thread reads atomics → no mutex needed, no blocking
-
-## Roadmap
-
-Potential future enhancements:
-- [ ] **Playback monitoring** — Capture from ALSA loopback devices or PulseAudio monitor sources to meter output audio
-- [ ] VU meter mode (slower ballistics, −20 to +3 VU scale)
-- [ ] Peak clip indicator (stays red for N seconds when 0 dB hit)
-- [ ] Configurable sample rate and buffer sizes (via UI or config file)
-- [ ] Spectrum analyzer view (FFT-based frequency bands)
-- [ ] Export functionality (CSV logging of peak/RMS over time)
-- [ ] PulseAudio / PipeWire backend option
-- [ ] Dark theme toggle
-
-## License
-
-This project is provided as-is for educational and personal use. Modify and distribute freely.
+- **Access mode**: `SND_PCM_ACCESS_RW_INTERLEAVED`
+- **Format**: `SND_PCM_FORMAT_S16_LE`
+- **Capture rate**: Prefers 8 kHz; accepts any rate and resamples
+- **Playback rate**: Prefers 16 kHz; accepts any rate and resamples
+- **Channels**: 1 (mono)
 
 ## Credits
 
+- RADAE codec by David Rowe ([github.com/drowe67](https://github.com/drowe67))
+- Opus/LPCNet/FARGAN by Xiph.Org / Amazon ([opus-codec.org](https://opus-codec.org/))
 - Built with GTK 3 ([gtk.org](https://www.gtk.org/))
-- Audio capture via ALSA ([alsa-project.org](https://www.alsa-project.org/))
-- Graphics rendering with Cairo ([cairographics.org](https://www.cairographics.org/))
+- Audio I/O via ALSA ([alsa-project.org](https://www.alsa-project.org/))
 
 ---
 
-**Author**: SimpleDecoder project
-**Created**: 2026
 **Platform**: Linux (Ubuntu 24.04 / Linux Mint)
