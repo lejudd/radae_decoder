@@ -243,14 +243,17 @@ The neural network weight files (`rade_enc_data.c`, `rade_dec_data.c`) are ~24 M
 Take a wav file off air and produce a demodulated wav file
 
 Usage:
+```
 rade_demod [-v 0|1|2] <input.wav> <output.wav>
+```
 
 ### RADE Modulate: WAV Speech Audio → WAV RADE
 Take a wav file with speech in it and produce a RADE OFDM encoded output wav file ready for transmission.
 
 Usage:
+```
 rade_modulate [-v 0|1|2] <intput.wav> <output.wav>
-
+```
 
 ### Encode: WAV → IQ
 ```
