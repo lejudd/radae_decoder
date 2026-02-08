@@ -267,6 +267,12 @@ static void on_window_destroy(GtkWidget* /*w*/, gpointer /*data*/)
     if (g_decoder) { g_decoder->stop(); g_decoder->close(); delete g_decoder; g_decoder = nullptr; }
 }
 
+/* File > Quit */
+static void on_quit(GtkMenuItem* /*item*/, gpointer app)
+{
+    g_application_quit(G_APPLICATION(app));
+}
+
 /* ── UI construction ────────────────────────────────────────────────────── */
 
 static void activate(GtkApplication* app, gpointer /*data*/)
@@ -307,10 +313,24 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     gtk_window_set_resizable     (GTK_WINDOW(window), TRUE);
     g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), NULL);
 
+    /* ── menu bar ──────────────────────────────────────────────────── */
+    GtkWidget* outer_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_container_add(GTK_CONTAINER(window), outer_vbox);
+
+    GtkWidget* menubar  = gtk_menu_bar_new();
+    GtkWidget* file_mi  = gtk_menu_item_new_with_label("File");
+    GtkWidget* file_menu = gtk_menu_new();
+    GtkWidget* quit_mi  = gtk_menu_item_new_with_label("Quit");
+    g_signal_connect(quit_mi, "activate", G_CALLBACK(on_quit), app);
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), quit_mi);
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(file_mi), file_menu);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menubar), file_mi);
+    gtk_box_pack_start(GTK_BOX(outer_vbox), menubar, FALSE, FALSE, 0);
+
     /* ── layout ────────────────────────────────────────────────────── */
     GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_container_set_border_width(GTK_CONTAINER(vbox), 12);
-    gtk_container_add(GTK_CONTAINER(window), vbox);
+    gtk_box_pack_start(GTK_BOX(outer_vbox), vbox, TRUE, TRUE, 0);
 
     /* ── input device selector row ────────────────────────────────── */
     GtkWidget* input_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
