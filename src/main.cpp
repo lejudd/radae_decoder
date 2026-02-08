@@ -273,6 +273,28 @@ static void on_quit(GtkMenuItem* /*item*/, gpointer app)
     g_application_quit(G_APPLICATION(app));
 }
 
+/* Edit > Settings */
+static void on_settings(GtkMenuItem* /*item*/, gpointer parent)
+{
+    GtkWidget* dlg = gtk_dialog_new_with_buttons(
+        "Settings",
+        GTK_WINDOW(parent),
+        GTK_DIALOG_MODAL,
+        "_Close", GTK_RESPONSE_CLOSE,
+        nullptr);
+    gtk_window_set_default_size(GTK_WINDOW(dlg), 400, 300);
+
+    GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
+    gtk_container_set_border_width(GTK_CONTAINER(content), 12);
+
+    GtkWidget* label = gtk_label_new("Settings will appear here.");
+    gtk_box_pack_start(GTK_BOX(content), label, TRUE, TRUE, 0);
+
+    gtk_widget_show_all(dlg);
+    gtk_dialog_run(GTK_DIALOG(dlg));
+    gtk_widget_destroy(dlg);
+}
+
 /* ── UI construction ────────────────────────────────────────────────────── */
 
 static void activate(GtkApplication* app, gpointer /*data*/)
@@ -325,6 +347,15 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), quit_mi);
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(file_mi), file_menu);
     gtk_menu_shell_append(GTK_MENU_SHELL(menubar), file_mi);
+
+    GtkWidget* edit_mi   = gtk_menu_item_new_with_label("Edit");
+    GtkWidget* edit_menu = gtk_menu_new();
+    GtkWidget* settings_mi = gtk_menu_item_new_with_label("Settings\xe2\x80\xa6");
+    g_signal_connect(settings_mi, "activate", G_CALLBACK(on_settings), window);
+    gtk_menu_shell_append(GTK_MENU_SHELL(edit_menu), settings_mi);
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(edit_mi), edit_menu);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menubar), edit_mi);
+
     gtk_box_pack_start(GTK_BOX(outer_vbox), menubar, FALSE, FALSE, 0);
 
     /* ── layout ────────────────────────────────────────────────────── */
