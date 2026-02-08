@@ -24,6 +24,7 @@ static GtkWidget*               g_meter_out          = nullptr;   // output leve
 static GtkWidget*               g_spectrum           = nullptr;   // spectrum widget
 static GtkWidget*               g_waterfall          = nullptr;   // waterfall widget
 static GtkWidget*               g_status             = nullptr;   // status label
+static GtkWidget*               g_settings_dlg       = nullptr;   // settings dialog
 static guint                    g_timer              = 0;         // meter update timer
 static bool                     g_updating_combos    = false;     // guard programmatic changes
 
@@ -274,25 +275,10 @@ static void on_quit(GtkMenuItem* /*item*/, gpointer app)
 }
 
 /* Edit > Settings */
-static void on_settings(GtkMenuItem* /*item*/, gpointer parent)
+static void on_settings(GtkMenuItem* /*item*/, gpointer /*data*/)
 {
-    GtkWidget* dlg = gtk_dialog_new_with_buttons(
-        "Settings",
-        GTK_WINDOW(parent),
-        GTK_DIALOG_MODAL,
-        "_Close", GTK_RESPONSE_CLOSE,
-        nullptr);
-    gtk_window_set_default_size(GTK_WINDOW(dlg), 400, 300);
-
-    GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
-    gtk_container_set_border_width(GTK_CONTAINER(content), 12);
-
-    GtkWidget* label = gtk_label_new("Settings will appear here.");
-    gtk_box_pack_start(GTK_BOX(content), label, TRUE, TRUE, 0);
-
-    gtk_widget_show_all(dlg);
-    gtk_dialog_run(GTK_DIALOG(dlg));
-    gtk_widget_destroy(dlg);
+    if (g_settings_dlg)
+        gtk_widget_show_all(g_settings_dlg);
 }
 
 /* ── UI construction ────────────────────────────────────────────────────── */
@@ -358,10 +344,22 @@ static void activate(GtkApplication* app, gpointer /*data*/)
 
     gtk_box_pack_start(GTK_BOX(outer_vbox), menubar, FALSE, FALSE, 0);
 
-    /* ── layout ────────────────────────────────────────────────────── */
-    GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_container_set_border_width(GTK_CONTAINER(vbox), 12);
-    gtk_box_pack_start(GTK_BOX(outer_vbox), vbox, TRUE, TRUE, 0);
+    /* ── settings dialog (created hidden, shown from Edit > Settings) ── */
+    g_settings_dlg = gtk_dialog_new_with_buttons(
+        "Settings",
+        GTK_WINDOW(window),
+        GTK_DIALOG_MODAL,
+        "_Close", GTK_RESPONSE_CLOSE,
+        nullptr);
+    gtk_window_set_default_size(GTK_WINDOW(g_settings_dlg), 400, -1);
+    g_signal_connect(g_settings_dlg, "delete-event",
+                     G_CALLBACK(gtk_widget_hide_on_delete), nullptr);
+    g_signal_connect_swapped(g_settings_dlg, "response",
+                             G_CALLBACK(gtk_widget_hide), g_settings_dlg);
+
+    GtkWidget* scontent = gtk_dialog_get_content_area(GTK_DIALOG(g_settings_dlg));
+    gtk_container_set_border_width(GTK_CONTAINER(scontent), 12);
+    gtk_box_set_spacing(GTK_BOX(scontent), 8);
 
     /* ── input device selector row ────────────────────────────────── */
     GtkWidget* input_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
@@ -381,7 +379,7 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     g_signal_connect(refresh, "clicked", G_CALLBACK(on_refresh), NULL);
     gtk_box_pack_start(GTK_BOX(input_hbox), refresh, FALSE, FALSE, 0);
 
-    gtk_box_pack_start(GTK_BOX(vbox), input_hbox, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(scontent), input_hbox, FALSE, FALSE, 0);
 
     /* ── output device selector row ────────────────────────────────── */
     GtkWidget* output_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
@@ -401,7 +399,12 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     gtk_widget_set_size_request(spacer, 28, -1);
     gtk_box_pack_start(GTK_BOX(output_hbox), spacer, FALSE, FALSE, 0);
 
-    gtk_box_pack_start(GTK_BOX(vbox), output_hbox, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(scontent), output_hbox, FALSE, FALSE, 0);
+
+    /* ── layout ────────────────────────────────────────────────────── */
+    GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_container_set_border_width(GTK_CONTAINER(vbox), 12);
+    gtk_box_pack_start(GTK_BOX(outer_vbox), vbox, TRUE, TRUE, 0);
 
     /* ── start / stop button ───────────────────────────────────────── */
     g_btn = gtk_button_new_with_label("Start");
