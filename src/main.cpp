@@ -325,11 +325,16 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     GtkWidget* outer_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_container_add(GTK_CONTAINER(window), outer_vbox);
 
+    GtkAccelGroup *accel_group = gtk_accel_group_new();
+    gtk_window_add_accel_group(GTK_WINDOW(window), accel_group);
+
     GtkWidget* menubar  = gtk_menu_bar_new();
     GtkWidget* file_mi  = gtk_menu_item_new_with_label("File");
     GtkWidget* file_menu = gtk_menu_new();
     GtkWidget* quit_mi  = gtk_menu_item_new_with_label("Quit");
     g_signal_connect(quit_mi, "activate", G_CALLBACK(on_quit), app);
+    gtk_widget_add_accelerator(quit_mi, "activate", accel_group,
+                               GDK_KEY_q, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
     gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), quit_mi);
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(file_mi), file_menu);
     gtk_menu_shell_append(GTK_MENU_SHELL(menubar), file_mi);
@@ -338,6 +343,8 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     GtkWidget* edit_menu = gtk_menu_new();
     GtkWidget* settings_mi = gtk_menu_item_new_with_label("Settings\xe2\x80\xa6");
     g_signal_connect(settings_mi, "activate", G_CALLBACK(on_settings), window);
+    gtk_widget_add_accelerator(settings_mi, "activate", accel_group,
+                               GDK_KEY_comma, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
     gtk_menu_shell_append(GTK_MENU_SHELL(edit_menu), settings_mi);
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(edit_mi), edit_menu);
     gtk_menu_shell_append(GTK_MENU_SHELL(menubar), edit_mi);
