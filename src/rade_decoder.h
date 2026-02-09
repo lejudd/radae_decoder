@@ -25,6 +25,7 @@ public:
 
     /* lifecycle -------------------------------------------------------------- */
     bool open(const std::string& input_hw_id, const std::string& output_hw_id);
+    bool open_file(const std::string& wav_path, const std::string& output_hw_id);
     void close();
     void start();
     void stop();
@@ -95,4 +96,9 @@ private:
     std::atomic<float> freq_offset_ {0.0f};
     std::atomic<float> input_level_ {0.0f};
     std::atomic<float> output_level_{0.0f};
+
+    /* ── File playback mode ────────────────────────────────────────────── */
+    bool                file_mode_      = false;
+    std::vector<float>  file_audio_8k_;          // pre-loaded 8 kHz mono audio
+    size_t              file_pos_       = 0;      // read position in file_audio_8k_
 };

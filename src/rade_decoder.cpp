@@ -40,6 +40,128 @@ static void init_hilbert_coeffs(float coeffs[], int ntaps) {
     }
 }
 
+/* ── WAV file I/O (adapted from rade_demod.c) ────────────────────────── */
+
+#define WAV_FMT_PCM   1
+#define WAV_FMT_FLOAT 3
+
+struct wav_info {
+    int      sample_rate;
+    int      num_channels;
+    int      bits_per_sample;
+    bool     is_float;
+    long     data_offset;
+    uint32_t data_size;
+};
+
+static bool wav_read_header(FILE* f, wav_info& info)
+{
+    char     tag[4];
+    uint32_t riff_size;
+
+    if (std::fread(tag, 1, 4, f) != 4 || std::memcmp(tag, "RIFF", 4)) return false;
+    if (std::fread(&riff_size, 4, 1, f) != 1) return false;
+    if (std::fread(tag, 1, 4, f) != 4 || std::memcmp(tag, "WAVE", 4)) return false;
+
+    info.data_offset = -1;
+
+    while (true) {
+        char     chunk_id[4];
+        uint32_t chunk_size;
+        if (std::fread(chunk_id, 1, 4, f) != 4) break;
+        if (std::fread(&chunk_size, 4, 1, f) != 1) break;
+
+        if (std::memcmp(chunk_id, "fmt ", 4) == 0) {
+            if (chunk_size < 16) return false;
+            uint8_t buf[16];
+            if (std::fread(buf, 1, 16, f) != 16) return false;
+
+            uint16_t audio_fmt, nch, bps;
+            uint32_t sr;
+            std::memcpy(&audio_fmt, buf + 0,  2);
+            std::memcpy(&nch,       buf + 2,  2);
+            std::memcpy(&sr,        buf + 4,  4);
+            std::memcpy(&bps,       buf + 14, 2);
+
+            info.sample_rate     = static_cast<int>(sr);
+            info.num_channels    = static_cast<int>(nch);
+            info.bits_per_sample = static_cast<int>(bps);
+            info.is_float        = (audio_fmt == WAV_FMT_FLOAT);
+
+            if (chunk_size > 16)
+                std::fseek(f, static_cast<long>(chunk_size - 16), SEEK_CUR);
+
+        } else if (std::memcmp(chunk_id, "data", 4) == 0) {
+            info.data_offset = std::ftell(f);
+            info.data_size   = chunk_size;
+            break;
+        } else {
+            std::fseek(f, static_cast<long>((chunk_size + 1) & ~1u), SEEK_CUR);
+        }
+    }
+    return (info.data_offset >= 0);
+}
+
+static std::vector<float> wav_read_mono_float(FILE* f, const wav_info& info)
+{
+    int  bps  = info.bits_per_sample;
+    int  nch  = info.num_channels;
+    long total = static_cast<long>(info.data_size) / (bps / 8);
+    long mono  = total / nch;
+
+    std::vector<float> buf(static_cast<size_t>(mono));
+
+    for (long i = 0; i < mono; i++) {
+        float sum = 0.0f;
+        for (int ch = 0; ch < nch; ch++) {
+            float v = 0.0f;
+            if (info.is_float && bps == 32) {
+                float tmp; if (std::fread(&tmp, 4, 1, f) == 1) v = tmp;
+            } else if (info.is_float && bps == 64) {
+                double tmp; if (std::fread(&tmp, 8, 1, f) == 1) v = static_cast<float>(tmp);
+            } else if (bps == 16) {
+                int16_t tmp; if (std::fread(&tmp, 2, 1, f) == 1) v = tmp / 32768.0f;
+            } else if (bps == 24) {
+                uint8_t b[3]; if (std::fread(b, 1, 3, f) == 3) {
+                    int32_t raw = (static_cast<int32_t>(b[2]) << 16) | (b[1] << 8) | b[0];
+                    if (raw & 0x800000) raw |= static_cast<int32_t>(0xFF000000);
+                    v = raw / 8388608.0f;
+                }
+            } else if (bps == 32) {
+                int32_t tmp; if (std::fread(&tmp, 4, 1, f) == 1) v = tmp / 2147483648.0f;
+            } else {
+                return {};
+            }
+            sum += v;
+        }
+        buf[static_cast<size_t>(i)] = sum / nch;
+    }
+    return buf;
+}
+
+static std::vector<float> resample_batch(const std::vector<float>& in,
+                                         int in_rate, int out_rate)
+{
+    if (in_rate == out_rate) return in;
+
+    auto n_in = static_cast<long>(in.size());
+    if (n_in < 2) return {};
+
+    long n_out = static_cast<long>(static_cast<double>(n_in) * out_rate / in_rate);
+    std::vector<float> out(static_cast<size_t>(n_out));
+
+    double step = static_cast<double>(in_rate) / static_cast<double>(out_rate);
+    for (long i = 0; i < n_out; i++) {
+        double pos  = i * step;
+        long   idx  = static_cast<long>(pos);
+        float  frac = static_cast<float>(pos - idx);
+        if (idx + 1 >= n_in) { idx = n_in - 2; frac = 1.0f; }
+        out[static_cast<size_t>(i)] = in[static_cast<size_t>(idx)]
+            + frac * (in[static_cast<size_t>(idx + 1)] - in[static_cast<size_t>(idx)]);
+    }
+    return out;
+}
+
 /* ── radix-2 Cooley-Tukey FFT (in-place, N must be power of 2) ────────── */
 
 static void fft_radix2(std::complex<float>* x, int N)
@@ -172,6 +294,72 @@ bool RadaeDecoder::open(const std::string& input_hw_id,
     return true;
 }
 
+bool RadaeDecoder::open_file(const std::string& wav_path,
+                              const std::string& output_hw_id)
+{
+    close();
+
+    /* ── Read and parse WAV file ────────────────────────────────── */
+    FILE* f = std::fopen(wav_path.c_str(), "rb");
+    if (!f) return false;
+
+    wav_info wav{};
+    if (!wav_read_header(f, wav)) {
+        std::fclose(f);
+        return false;
+    }
+
+    auto mono = wav_read_mono_float(f, wav);
+    std::fclose(f);
+    if (mono.empty()) return false;
+
+    /* ── Resample to 8 kHz ──────────────────────────────────────── */
+    if (wav.sample_rate != RADE_FS) {
+        file_audio_8k_ = resample_batch(mono, wav.sample_rate, RADE_FS);
+    } else {
+        file_audio_8k_ = std::move(mono);
+    }
+    if (file_audio_8k_.empty()) return false;
+    file_pos_ = 0;
+
+    /* ── ALSA playback only (no capture) ────────────────────────── */
+    rate_out_ = RADE_FS_SPEECH;
+    if (!open_alsa(&pcm_out_, output_hw_id, SND_PCM_STREAM_PLAYBACK,
+                   &rate_out_, 512, 4096))
+        return false;
+
+    /* ── RADE receiver ──────────────────────────────────────────── */
+    rade_initialize();
+    rade_ = rade_open(nullptr, RADE_VERBOSE_0);
+    if (!rade_) {
+        snd_pcm_close(pcm_out_); pcm_out_ = nullptr;
+        return false;
+    }
+
+    /* ── FARGAN vocoder ─────────────────────────────────────────── */
+    fargan_ = new FARGANState;
+    fargan_init(static_cast<FARGANState*>(fargan_));
+    fargan_ready_ = false;
+    warmup_count_ = 0;
+
+    /* ── Hilbert coefficients ───────────────────────────────────── */
+    init_hilbert_coeffs(hilbert_coeffs_, HILBERT_NTAPS);
+    std::memset(hilbert_hist_, 0, sizeof(hilbert_hist_));
+    hilbert_pos_ = 0;
+    std::memset(delay_buf_, 0, sizeof(delay_buf_));
+    delay_pos_ = 0;
+
+    /* ── Hanning window for FFT ─────────────────────────────────── */
+    for (int i = 0; i < FFT_SIZE; i++)
+        fft_window_[i] = 0.5f * (1.0f - std::cos(2.0f * static_cast<float>(M_PI) * i / (FFT_SIZE - 1)));
+    std::memset(spectrum_mag_, 0, sizeof(spectrum_mag_));
+
+    file_mode_ = true;
+    rate_in_ = RADE_FS;
+
+    return true;
+}
+
 void RadaeDecoder::close()
 {
     stop();
@@ -181,6 +369,11 @@ void RadaeDecoder::close()
 
     if (pcm_in_)  { snd_pcm_close(pcm_in_);  pcm_in_  = nullptr; }
     if (pcm_out_) { snd_pcm_close(pcm_out_); pcm_out_ = nullptr; }
+
+    file_audio_8k_.clear();
+    file_audio_8k_.shrink_to_fit();
+    file_pos_  = 0;
+    file_mode_ = false;
 
     synced_       = false;
     snr_dB_       = 0.0f;
@@ -193,7 +386,7 @@ void RadaeDecoder::close()
 
 void RadaeDecoder::start()
 {
-    if (!pcm_in_ || !pcm_out_ || !rade_ || running_) return;
+    if ((!pcm_in_ && !file_mode_) || !pcm_out_ || !rade_ || running_) return;
     running_ = true;
     thread_  = std::thread(&RadaeDecoder::processing_loop, this);
 }
@@ -332,30 +525,46 @@ void RadaeDecoder::processing_loop()
         while (static_cast<int>(acc_8k.size()) < nin &&
                running_.load(std::memory_order_relaxed))
         {
-            snd_pcm_sframes_t n = snd_pcm_readi(pcm_in_, capture_buf.data(), READ_FRAMES);
-            if (n < 0) {
-                if (!running_.load(std::memory_order_relaxed)) break;
-                if (n == -EINTR) continue;
-                n = snd_pcm_recover(pcm_in_, static_cast<int>(n), 1);
-                if (n < 0) { running_ = false; break; }
-                continue;
+            if (file_mode_) {
+                /* ── file mode: copy from pre-loaded buffer ───────── */
+                size_t remaining = file_audio_8k_.size() - file_pos_;
+                if (remaining == 0) {
+                    running_ = false;
+                    break;
+                }
+                size_t need  = static_cast<size_t>(nin) - acc_8k.size();
+                size_t chunk = std::min(need, remaining);
+                acc_8k.insert(acc_8k.end(),
+                              file_audio_8k_.begin() + static_cast<ptrdiff_t>(file_pos_),
+                              file_audio_8k_.begin() + static_cast<ptrdiff_t>(file_pos_ + chunk));
+                file_pos_ += chunk;
+            } else {
+                /* ── live mode: read from ALSA capture ────────────── */
+                snd_pcm_sframes_t n = snd_pcm_readi(pcm_in_, capture_buf.data(), READ_FRAMES);
+                if (n < 0) {
+                    if (!running_.load(std::memory_order_relaxed)) break;
+                    if (n == -EINTR) continue;
+                    n = snd_pcm_recover(pcm_in_, static_cast<int>(n), 1);
+                    if (n < 0) { running_ = false; break; }
+                    continue;
+                }
+                if (n == 0) continue;
+
+                /* convert S16 → float */
+                std::vector<float> f_in(static_cast<size_t>(n));
+                for (snd_pcm_sframes_t i = 0; i < n; i++)
+                    f_in[static_cast<size_t>(i)] = capture_buf[static_cast<size_t>(i)] / 32768.0f;
+
+                /* resample to 8 kHz */
+                int got = resample_linear_stream(
+                    f_in.data(), static_cast<int>(n),
+                    resamp_tmp.data(), resamp_out_max,
+                    rate_in_, RADE_FS,
+                    resamp_in_frac_, resamp_in_prev_);
+
+                acc_8k.insert(acc_8k.end(), resamp_tmp.begin(),
+                              resamp_tmp.begin() + got);
             }
-            if (n == 0) continue;
-
-            /* convert S16 → float */
-            std::vector<float> f_in(static_cast<size_t>(n));
-            for (snd_pcm_sframes_t i = 0; i < n; i++)
-                f_in[static_cast<size_t>(i)] = capture_buf[static_cast<size_t>(i)] / 32768.0f;
-
-            /* resample to 8 kHz */
-            int got = resample_linear_stream(
-                f_in.data(), static_cast<int>(n),
-                resamp_tmp.data(), resamp_out_max,
-                rate_in_, RADE_FS,
-                resamp_in_frac_, resamp_in_prev_);
-
-            acc_8k.insert(acc_8k.end(), resamp_tmp.begin(),
-                          resamp_tmp.begin() + got);
         }
 
         if (!running_.load(std::memory_order_relaxed)) break;

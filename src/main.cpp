@@ -134,7 +134,14 @@ static void stop_decoder()
 /* timer tick – update meter + status at ~30 fps */
 static gboolean on_meter_tick(gpointer /*data*/)
 {
-    if (!g_decoder || !g_decoder->is_running()) return TRUE;
+    if (!g_decoder) return TRUE;
+
+    if (!g_decoder->is_running()) {
+        /* decoder stopped itself (e.g. file playback finished) */
+        stop_decoder();
+        set_status("Playback finished.");
+        return FALSE;
+    }
 
     /* update level meters */
     if (g_meter_in)
@@ -268,6 +275,68 @@ static void on_window_destroy(GtkWidget* /*w*/, gpointer /*data*/)
     if (g_decoder) { g_decoder->stop(); g_decoder->close(); delete g_decoder; g_decoder = nullptr; }
 }
 
+/* ── file playback ─────────────────────────────────────────────────────── */
+
+static void start_decoder_file(const std::string& wav_path, int out_idx)
+{
+    if (out_idx < 0 || out_idx >= static_cast<int>(g_output_devices.size())) return;
+
+    stop_decoder();
+
+    if (!g_decoder) g_decoder = new RadaeDecoder();
+
+    if (!g_decoder->open_file(wav_path,
+                               g_output_devices[static_cast<size_t>(out_idx)].hw_id)) {
+        set_status("Failed to open WAV file or audio output.");
+        set_btn_state(false);
+        return;
+    }
+
+    g_decoder->start();
+    set_btn_state(true);
+    set_status("Playing file\xe2\x80\xa6");
+    g_timer = g_timeout_add(33, on_meter_tick, nullptr);
+}
+
+/* File > Open */
+static void on_open_file(GtkMenuItem* /*item*/, gpointer parent_window)
+{
+    int out_idx = gtk_combo_box_get_active(GTK_COMBO_BOX(g_output_combo));
+    if (out_idx < 0) {
+        set_status("Select an output device first (Edit > Settings).");
+        return;
+    }
+
+    GtkWidget* dialog = gtk_file_chooser_dialog_new(
+        "Open WAV File",
+        GTK_WINDOW(parent_window),
+        GTK_FILE_CHOOSER_ACTION_OPEN,
+        "_Cancel", GTK_RESPONSE_CANCEL,
+        "_Open",   GTK_RESPONSE_ACCEPT,
+        nullptr);
+
+    GtkFileFilter* filter_wav = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter_wav, "WAV files (*.wav)");
+    gtk_file_filter_add_pattern(filter_wav, "*.wav");
+    gtk_file_filter_add_pattern(filter_wav, "*.WAV");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter_wav);
+
+    GtkFileFilter* filter_all = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter_all, "All files");
+    gtk_file_filter_add_pattern(filter_all, "*");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter_all);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        char* filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+        if (filename) {
+            start_decoder_file(filename, out_idx);
+            g_free(filename);
+        }
+    }
+
+    gtk_widget_destroy(dialog);
+}
+
 /* File > Quit */
 static void on_quit(GtkMenuItem* /*item*/, gpointer app)
 {
@@ -331,6 +400,15 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     GtkWidget* menubar  = gtk_menu_bar_new();
     GtkWidget* file_mi  = gtk_menu_item_new_with_label("File");
     GtkWidget* file_menu = gtk_menu_new();
+
+    GtkWidget* open_mi  = gtk_menu_item_new_with_label("Open\xe2\x80\xa6");
+    g_signal_connect(open_mi, "activate", G_CALLBACK(on_open_file), window);
+    gtk_widget_add_accelerator(open_mi, "activate", accel_group,
+                               GDK_KEY_o, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), open_mi);
+
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), gtk_separator_menu_item_new());
+
     GtkWidget* quit_mi  = gtk_menu_item_new_with_label("Quit");
     g_signal_connect(quit_mi, "activate", G_CALLBACK(on_quit), app);
     gtk_widget_add_accelerator(quit_mi, "activate", accel_group,
