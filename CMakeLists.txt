@@ -29,7 +29,7 @@ set(RADE_DSP_SOURCES
 )
 
 add_library(rade
-    src/rade_api_nopy.c
+    src/rade_api.c
     src/rade_enc.c
     src/rade_dec.c
     src/rade_enc_data.c
@@ -50,10 +50,10 @@ set_target_properties(rade PROPERTIES
 add_executable(lpcnet_demo src/lpcnet_demo.c)
 target_link_libraries(lpcnet_demo opus m)
 
-add_executable(radae_tx src/radae_tx_nopy.c)
+add_executable(radae_tx src/radae_tx.c)
 target_link_libraries(radae_tx rade opus m)
 
-add_executable(radae_rx src/radae_rx_nopy.c)
+add_executable(radae_rx src/radae_rx.c)
 target_link_libraries(radae_rx rade opus m)
 
 add_executable(real2iq src/real2iq.c)

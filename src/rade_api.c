@@ -1,6 +1,6 @@
 /*---------------------------------------------------------------------------*\
 
-  rade_api_nopy.c
+  rade_api.c
 
   Library of API functions that implement the Radio Autoencoder API.
   Pure C implementation - no Python dependency.

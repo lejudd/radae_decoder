@@ -1,6 +1,6 @@
 /*---------------------------------------------------------------------------*\
 
-  radae_tx_nopy.c
+  radae_tx.c
 
   RADAE streaming transmitter - Python-free version.
   Reads features from stdin, writes IQ samples to stdout.
@@ -44,7 +44,7 @@
 #include "rade_dsp.h"
 
 void usage(void) {
-    fprintf(stderr, "usage: radae_tx_nopy [options]\n");
+    fprintf(stderr, "usage: radae_tx [options]\n");
     fprintf(stderr, "  -h, --help           Show this help\n");
     fprintf(stderr, "  --model_name FILE    Path to model (ignored, uses built-in weights)\n");
     fprintf(stderr, "\n");
