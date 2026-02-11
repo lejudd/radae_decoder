@@ -578,7 +578,7 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     GtkWidget* file_mi  = gtk_menu_item_new_with_label("File");
     GtkWidget* file_menu = gtk_menu_new();
 
-    GtkWidget* open_mi  = gtk_menu_item_new_with_label("Open\xe2\x80\xa6");
+    GtkWidget* open_mi  = gtk_menu_item_new_with_label("Open WAV\xe2\x80\xa6");
     g_signal_connect(open_mi, "activate", G_CALLBACK(on_open_file), window);
     gtk_widget_add_accelerator(open_mi, "activate", accel_group,
                                GDK_KEY_o, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
