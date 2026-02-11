@@ -18,6 +18,10 @@ static std::vector<AudioDevice> g_input_devices;
 static std::vector<AudioDevice> g_output_devices;
 static GtkWidget*               g_input_combo        = nullptr;   // input device selector
 static GtkWidget*               g_output_combo       = nullptr;   // output device selector
+static std::vector<AudioDevice> g_tx_input_devices;
+static std::vector<AudioDevice> g_tx_output_devices;
+static GtkWidget*               g_tx_input_combo     = nullptr;   // transmit mic input selector
+static GtkWidget*               g_tx_output_combo    = nullptr;   // transmit radio output selector
 static GtkWidget*               g_btn                = nullptr;   // start / stop
 static GtkWidget*               g_meter_in           = nullptr;   // input level meter
 static GtkWidget*               g_meter_out          = nullptr;   // output level meter
@@ -50,10 +54,21 @@ static void save_config()
     if (out_idx >= 0 && out_idx < static_cast<int>(g_output_devices.size()))
         out_name = g_output_devices[static_cast<size_t>(out_idx)].name;
 
+    int tx_in_idx  = gtk_combo_box_get_active(GTK_COMBO_BOX(g_tx_input_combo));
+    int tx_out_idx = gtk_combo_box_get_active(GTK_COMBO_BOX(g_tx_output_combo));
+
+    std::string tx_in_name, tx_out_name;
+    if (tx_in_idx >= 0 && tx_in_idx < static_cast<int>(g_tx_input_devices.size()))
+        tx_in_name = g_tx_input_devices[static_cast<size_t>(tx_in_idx)].name;
+    if (tx_out_idx >= 0 && tx_out_idx < static_cast<int>(g_tx_output_devices.size()))
+        tx_out_name = g_tx_output_devices[static_cast<size_t>(tx_out_idx)].name;
+
     std::ofstream f(config_path());
     if (f) {
         f << "input=" << in_name << '\n';
         f << "output=" << out_name << '\n';
+        f << "tx_input=" << tx_in_name << '\n';
+        f << "tx_output=" << tx_out_name << '\n';
     }
 }
 
@@ -63,13 +78,17 @@ static bool restore_config()
     std::ifstream f(config_path());
     if (!f) return false;
 
-    std::string saved_in, saved_out;
+    std::string saved_in, saved_out, saved_tx_in, saved_tx_out;
     std::string line;
     while (std::getline(f, line)) {
         if (line.compare(0, 6, "input=") == 0)
             saved_in = line.substr(6);
         else if (line.compare(0, 7, "output=") == 0)
             saved_out = line.substr(7);
+        else if (line.compare(0, 9, "tx_input=") == 0)
+            saved_tx_in = line.substr(9);
+        else if (line.compare(0, 10, "tx_output=") == 0)
+            saved_tx_out = line.substr(10);
     }
 
     if (saved_in.empty() && saved_out.empty()) return false;
@@ -88,9 +107,25 @@ static bool restore_config()
         }
     }
 
+    int tx_in_idx = -1, tx_out_idx = -1;
+    for (size_t i = 0; i < g_tx_input_devices.size(); i++) {
+        if (g_tx_input_devices[i].name == saved_tx_in) {
+            tx_in_idx = static_cast<int>(i);
+            break;
+        }
+    }
+    for (size_t i = 0; i < g_tx_output_devices.size(); i++) {
+        if (g_tx_output_devices[i].name == saved_tx_out) {
+            tx_out_idx = static_cast<int>(i);
+            break;
+        }
+    }
+
     g_updating_combos = true;
-    if (in_idx >= 0)  gtk_combo_box_set_active(GTK_COMBO_BOX(g_input_combo), in_idx);
-    if (out_idx >= 0) gtk_combo_box_set_active(GTK_COMBO_BOX(g_output_combo), out_idx);
+    if (in_idx >= 0)     gtk_combo_box_set_active(GTK_COMBO_BOX(g_input_combo), in_idx);
+    if (out_idx >= 0)    gtk_combo_box_set_active(GTK_COMBO_BOX(g_output_combo), out_idx);
+    if (tx_in_idx >= 0)  gtk_combo_box_set_active(GTK_COMBO_BOX(g_tx_input_combo), tx_in_idx);
+    if (tx_out_idx >= 0) gtk_combo_box_set_active(GTK_COMBO_BOX(g_tx_output_combo), tx_out_idx);
     g_updating_combos = false;
 
     return (in_idx >= 0 && out_idx >= 0);
@@ -222,6 +257,13 @@ static void on_output_combo_changed(GtkComboBox* combo, gpointer /*data*/)
         start_decoder(in_idx, out_idx);
 }
 
+/* selecting a transmit device: just save config */
+static void on_tx_combo_changed(GtkComboBox* /*combo*/, gpointer /*data*/)
+{
+    if (g_updating_combos) return;
+    save_config();
+}
+
 /* start / stop toggle */
 static void on_start_stop(GtkButton* /*btn*/, gpointer /*data*/)
 {
@@ -244,8 +286,10 @@ static void on_refresh(GtkButton* /*btn*/, gpointer /*data*/)
 {
     if (g_decoder && g_decoder->is_running()) stop_decoder();
 
-    g_input_devices  = AudioInput::enumerate_devices();
-    g_output_devices = AudioInput::enumerate_playback_devices();
+    g_input_devices    = AudioInput::enumerate_devices();
+    g_output_devices   = AudioInput::enumerate_playback_devices();
+    g_tx_input_devices = AudioInput::enumerate_devices();
+    g_tx_output_devices = AudioInput::enumerate_playback_devices();
 
     g_updating_combos = true;
 
@@ -260,6 +304,18 @@ static void on_refresh(GtkButton* /*btn*/, gpointer /*data*/)
     for (const auto& d : g_output_devices)
         gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(g_output_combo), d.name.c_str());
     gtk_combo_box_set_active(GTK_COMBO_BOX(g_output_combo), -1);
+
+    /* populate transmit input combo (mic) */
+    gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(g_tx_input_combo));
+    for (const auto& d : g_tx_input_devices)
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(g_tx_input_combo), d.name.c_str());
+    gtk_combo_box_set_active(GTK_COMBO_BOX(g_tx_input_combo), -1);
+
+    /* populate transmit output combo (radio) */
+    gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(g_tx_output_combo));
+    for (const auto& d : g_tx_output_devices)
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(g_tx_output_combo), d.name.c_str());
+    gtk_combo_box_set_active(GTK_COMBO_BOX(g_tx_output_combo), -1);
 
     g_updating_combos = false;
 
@@ -446,6 +502,11 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     gtk_container_set_border_width(GTK_CONTAINER(scontent), 12);
     gtk_box_set_spacing(GTK_BOX(scontent), 8);
 
+    GtkWidget* rx_heading = gtk_label_new(nullptr);
+    gtk_label_set_markup(GTK_LABEL(rx_heading), "<b>Receive</b>");
+    gtk_label_set_xalign(GTK_LABEL(rx_heading), 0.0);
+    gtk_box_pack_start(GTK_BOX(scontent), rx_heading, FALSE, FALSE, 0);
+
     /* ── input device selector row ────────────────────────────────── */
     GtkWidget* input_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 
@@ -485,6 +546,55 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     gtk_box_pack_start(GTK_BOX(output_hbox), spacer, FALSE, FALSE, 0);
 
     gtk_box_pack_start(GTK_BOX(scontent), output_hbox, FALSE, FALSE, 0);
+
+    /* ── separator between Receive and Transmit sections ──────────── */
+    gtk_box_pack_start(GTK_BOX(scontent),
+                       gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 4);
+
+    GtkWidget* tx_heading = gtk_label_new(nullptr);
+    gtk_label_set_markup(GTK_LABEL(tx_heading), "<b>Transmit</b>");
+    gtk_label_set_xalign(GTK_LABEL(tx_heading), 0.0);
+    gtk_box_pack_start(GTK_BOX(scontent), tx_heading, FALSE, FALSE, 0);
+
+    /* ── transmit input (microphone) selector row ─────────────────── */
+    GtkWidget* tx_input_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+
+    GtkWidget* tx_input_label = gtk_label_new("Microphone In:");
+    gtk_widget_set_size_request(tx_input_label, 50, -1);
+    gtk_label_set_xalign(GTK_LABEL(tx_input_label), 0.0);
+    gtk_box_pack_start(GTK_BOX(tx_input_hbox), tx_input_label, FALSE, FALSE, 0);
+
+    g_tx_input_combo = gtk_combo_box_text_new();
+    gtk_widget_set_tooltip_text(g_tx_input_combo, "Microphone input for transmit");
+    g_signal_connect(g_tx_input_combo, "changed", G_CALLBACK(on_tx_combo_changed), NULL);
+    gtk_box_pack_start(GTK_BOX(tx_input_hbox), g_tx_input_combo, TRUE, TRUE, 0);
+
+    /* spacer to align with refresh button above */
+    GtkWidget* tx_in_spacer = gtk_label_new("");
+    gtk_widget_set_size_request(tx_in_spacer, 28, -1);
+    gtk_box_pack_start(GTK_BOX(tx_input_hbox), tx_in_spacer, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(scontent), tx_input_hbox, FALSE, FALSE, 0);
+
+    /* ── transmit output (radio) selector row ─────────────────────── */
+    GtkWidget* tx_output_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+
+    GtkWidget* tx_output_label = gtk_label_new("Radio Out:");
+    gtk_widget_set_size_request(tx_output_label, 50, -1);
+    gtk_label_set_xalign(GTK_LABEL(tx_output_label), 0.0);
+    gtk_box_pack_start(GTK_BOX(tx_output_hbox), tx_output_label, FALSE, FALSE, 0);
+
+    g_tx_output_combo = gtk_combo_box_text_new();
+    gtk_widget_set_tooltip_text(g_tx_output_combo, "Audio output to radio for transmit");
+    g_signal_connect(g_tx_output_combo, "changed", G_CALLBACK(on_tx_combo_changed), NULL);
+    gtk_box_pack_start(GTK_BOX(tx_output_hbox), g_tx_output_combo, TRUE, TRUE, 0);
+
+    /* spacer to align with refresh button above */
+    GtkWidget* tx_out_spacer = gtk_label_new("");
+    gtk_widget_set_size_request(tx_out_spacer, 28, -1);
+    gtk_box_pack_start(GTK_BOX(tx_output_hbox), tx_out_spacer, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(scontent), tx_output_hbox, FALSE, FALSE, 0);
 
     /* ── layout ────────────────────────────────────────────────────── */
     GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
