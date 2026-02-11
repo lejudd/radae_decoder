@@ -12,8 +12,9 @@ find_package(Threads    REQUIRED)
 # ensure pkg-config can locate .pc files in the multiarch lib directory
 set(ENV{PKG_CONFIG_PATH} "/usr/lib/x86_64-linux-gnu/pkgconfig")
 
-pkg_check_modules(GTK  REQUIRED gtk+-3.0)
-pkg_check_modules(ALSA REQUIRED alsa)
+pkg_check_modules(GTK    REQUIRED gtk+-3.0)
+pkg_check_modules(ALSA   REQUIRED alsa)
+pkg_check_modules(HAMLIB REQUIRED hamlib)
 
 # ── Opus (with FARGAN/LPCNet support) ────────────────────────────────────────
 include(cmake/BuildOpus.cmake)
@@ -79,6 +80,7 @@ add_executable(radae_decoder
 target_include_directories(radae_decoder PRIVATE
     ${GTK_INCLUDE_DIRS}
     ${ALSA_INCLUDE_DIRS}
+    ${HAMLIB_INCLUDE_DIRS}
     ${OPUS_SOURCE_DIR}/dnn
     ${OPUS_SOURCE_DIR}/celt
     ${OPUS_SOURCE_DIR}/include
@@ -91,6 +93,7 @@ target_link_libraries(radae_decoder
     m
     ${GTK_LIBRARIES}
     ${ALSA_LIBRARIES}
+    ${HAMLIB_LIBRARIES}
     Threads::Threads
 )
 

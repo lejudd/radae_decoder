@@ -1,4 +1,5 @@
 #include <gtk/gtk.h>
+#include <hamlib/rig.h>
 #include <vector>
 #include <string>
 #include <cstdio>
@@ -34,6 +35,7 @@ static GtkWidget*               g_status             = nullptr;   // status labe
 static GtkWidget*               g_settings_dlg       = nullptr;   // settings dialog
 static GtkWidget*               g_mic_slider         = nullptr;   // TX mic input level slider
 static GtkWidget*               g_tx_slider          = nullptr;   // TX output level slider
+static GtkWidget*               g_rig_control_win    = nullptr;   // rig control window
 static guint                    g_timer              = 0;         // meter update timer
 static bool                     g_updating_combos    = false;     // guard programmatic changes
 
@@ -527,6 +529,82 @@ static void on_settings(GtkMenuItem* /*item*/, gpointer /*data*/)
         gtk_widget_show_all(g_settings_dlg);
 }
 
+/* Edit > Rig Control */
+static void on_rig_control(GtkMenuItem* /*item*/, gpointer /*data*/)
+{
+    if (g_rig_control_win)
+        gtk_widget_show_all(g_rig_control_win);
+}
+
+/* Callback for rig_list_foreach — appends each rig to the GtkListStore */
+static int rig_list_cb(const struct rig_caps* caps, rig_ptr_t data)
+{
+    auto* store = static_cast<GtkListStore*>(data);
+    GtkTreeIter iter;
+    gtk_list_store_append(store, &iter);
+    gtk_list_store_set(store, &iter,
+                       0, caps->rig_model,
+                       1, caps->mfg_name  ? caps->mfg_name  : "",
+                       2, caps->model_name ? caps->model_name : "",
+                       -1);
+    return 1;   /* 1 = continue iterating */
+}
+
+static void build_rig_control_window(GtkWidget* parent)
+{
+    g_rig_control_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(g_rig_control_win), "Rig Control");
+    gtk_window_set_default_size(GTK_WINDOW(g_rig_control_win), 500, 400);
+    gtk_window_set_transient_for(GTK_WINDOW(g_rig_control_win),
+                                 GTK_WINDOW(parent));
+    g_signal_connect(g_rig_control_win, "delete-event",
+                     G_CALLBACK(gtk_widget_hide_on_delete), nullptr);
+
+    GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_container_set_border_width(GTK_CONTAINER(vbox), 8);
+    gtk_container_add(GTK_CONTAINER(g_rig_control_win), vbox);
+
+    /* version label */
+    char ver_buf[128];
+    snprintf(ver_buf, sizeof(ver_buf), "Hamlib version: %s", hamlib_version);
+    GtkWidget* ver_label = gtk_label_new(ver_buf);
+    gtk_widget_set_halign(ver_label, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(vbox), ver_label, FALSE, FALSE, 0);
+
+    /* rig list store: model#, manufacturer, model name */
+    GtkListStore* store = gtk_list_store_new(3,
+                                             G_TYPE_INT,
+                                             G_TYPE_STRING,
+                                             G_TYPE_STRING);
+    rig_load_all_backends();
+    rig_list_foreach(rig_list_cb, store);
+
+    /* tree view */
+    GtkWidget* tree = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
+    g_object_unref(store);   /* tree view holds its own ref */
+
+    GtkCellRenderer* r_int = gtk_cell_renderer_text_new();
+    GtkCellRenderer* r_mfg = gtk_cell_renderer_text_new();
+    GtkCellRenderer* r_mdl = gtk_cell_renderer_text_new();
+    gtk_tree_view_append_column(GTK_TREE_VIEW(tree),
+        gtk_tree_view_column_new_with_attributes("Model #", r_int,
+                                                  "text", 0, nullptr));
+    gtk_tree_view_append_column(GTK_TREE_VIEW(tree),
+        gtk_tree_view_column_new_with_attributes("Manufacturer", r_mfg,
+                                                  "text", 1, nullptr));
+    gtk_tree_view_append_column(GTK_TREE_VIEW(tree),
+        gtk_tree_view_column_new_with_attributes("Model Name", r_mdl,
+                                                  "text", 2, nullptr));
+
+    /* scrolled container */
+    GtkWidget* scroll = gtk_scrolled_window_new(nullptr, nullptr);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+                                   GTK_POLICY_AUTOMATIC,
+                                   GTK_POLICY_AUTOMATIC);
+    gtk_container_add(GTK_CONTAINER(scroll), tree);
+    gtk_box_pack_start(GTK_BOX(vbox), scroll, TRUE, TRUE, 0);
+}
+
 /* ── UI construction ────────────────────────────────────────────────────── */
 
 static void activate(GtkApplication* app, gpointer /*data*/)
@@ -601,6 +679,13 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     gtk_widget_add_accelerator(settings_mi, "activate", accel_group,
                                GDK_KEY_comma, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
     gtk_menu_shell_append(GTK_MENU_SHELL(edit_menu), settings_mi);
+
+    gtk_menu_shell_append(GTK_MENU_SHELL(edit_menu), gtk_separator_menu_item_new());
+
+    GtkWidget* rig_mi = gtk_menu_item_new_with_label("Rig Control\xe2\x80\xa6");
+    g_signal_connect(rig_mi, "activate", G_CALLBACK(on_rig_control), window);
+    gtk_menu_shell_append(GTK_MENU_SHELL(edit_menu), rig_mi);
+
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(edit_mi), edit_menu);
     gtk_menu_shell_append(GTK_MENU_SHELL(menubar), edit_mi);
 
@@ -716,6 +801,9 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     gtk_box_pack_start(GTK_BOX(tx_output_hbox), tx_out_spacer, FALSE, FALSE, 0);
 
     gtk_box_pack_start(GTK_BOX(scontent), tx_output_hbox, FALSE, FALSE, 0);
+
+    /* ── rig control window (created hidden, shown from Edit > Rig Control) ── */
+    build_rig_control_window(window);
 
     /* ── layout ────────────────────────────────────────────────────── */
     GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
