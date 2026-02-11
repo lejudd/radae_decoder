@@ -182,7 +182,8 @@ static void write_real_to_alsa(snd_pcm_t* pcm, const RADE_COMP* iq, int n_iq,
                                unsigned int rate_modem, unsigned int rate_out,
                                double& resamp_frac, float& resamp_prev,
                                std::atomic<float>& output_level,
-                               const std::atomic<bool>& running)
+                               const std::atomic<bool>& running,
+                               float tx_scale)
 {
     /* convert IQ → real float and compute RMS */
     std::vector<float> real_8k(static_cast<size_t>(n_iq));
@@ -203,11 +204,10 @@ static void write_real_to_alsa(snd_pcm_t* pcm, const RADE_COMP* iq, int n_iq,
         rate_modem, rate_out,
         resamp_frac, resamp_prev);
 
-    /* float → S16 with scaling (16384 for moderate level with headroom) */
-    static constexpr float TX_SCALE = 16384.0f;
+    /* float → S16 with caller-supplied scale */
     std::vector<int16_t> out_pcm(static_cast<size_t>(n_resamp));
     for (int s = 0; s < n_resamp; s++) {
-        float v = out_f[static_cast<size_t>(s)] * TX_SCALE;
+        float v = out_f[static_cast<size_t>(s)] * tx_scale;
         if (v >  32767.0f) v =  32767.0f;
         if (v < -32767.0f) v = -32767.0f;
         out_pcm[static_cast<size_t>(s)] = static_cast<int16_t>(v);
@@ -363,7 +363,8 @@ void RadaeEncoder::processing_loop()
                 write_real_to_alsa(pcm_out_, tx_out.data(), n_out,
                                    RADE_FS, rate_out_,
                                    resamp_out_frac_, resamp_out_prev_,
-                                   output_level_, running_);
+                                   output_level_, running_,
+                                   tx_scale_.load(std::memory_order_relaxed));
                 feat_count = 0;
             }
         }
@@ -378,7 +379,8 @@ void RadaeEncoder::processing_loop()
         write_real_to_alsa(pcm_out_, eoo_out.data(), n_out,
                            RADE_FS, rate_out_,
                            resamp_out_frac_, resamp_out_prev_,
-                           output_level_, running_);
+                           output_level_, running_,
+                           tx_scale_.load(std::memory_order_relaxed));
         snd_pcm_drain(pcm_out_);
     }
 }

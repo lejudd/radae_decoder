@@ -32,6 +32,7 @@ static GtkWidget*               g_spectrum           = nullptr;   // spectrum wi
 static GtkWidget*               g_waterfall          = nullptr;   // waterfall widget
 static GtkWidget*               g_status             = nullptr;   // status label
 static GtkWidget*               g_settings_dlg       = nullptr;   // settings dialog
+static GtkWidget*               g_tx_slider          = nullptr;   // TX output level slider
 static guint                    g_timer              = 0;         // meter update timer
 static bool                     g_updating_combos    = false;     // guard programmatic changes
 
@@ -72,6 +73,7 @@ static void save_config()
         f << "output=" << out_name << '\n';
         f << "tx_input=" << tx_in_name << '\n';
         f << "tx_output=" << tx_out_name << '\n';
+        f << "tx_level=" << static_cast<int>(gtk_range_get_value(GTK_RANGE(g_tx_slider))) << '\n';
     }
 }
 
@@ -82,6 +84,7 @@ static bool restore_config()
     if (!f) return false;
 
     std::string saved_in, saved_out, saved_tx_in, saved_tx_out;
+    int saved_tx_level = -1;
     std::string line;
     while (std::getline(f, line)) {
         if (line.compare(0, 6, "input=") == 0)
@@ -92,6 +95,8 @@ static bool restore_config()
             saved_tx_in = line.substr(9);
         else if (line.compare(0, 10, "tx_output=") == 0)
             saved_tx_out = line.substr(10);
+        else if (line.compare(0, 9, "tx_level=") == 0)
+            saved_tx_level = std::stoi(line.substr(9));
     }
 
     if (saved_in.empty() && saved_out.empty()) return false;
@@ -131,6 +136,9 @@ static bool restore_config()
     if (tx_out_idx >= 0) gtk_combo_box_set_active(GTK_COMBO_BOX(g_tx_output_combo), tx_out_idx);
     g_updating_combos = false;
 
+    if (saved_tx_level >= 0 && saved_tx_level <= 100)
+        gtk_range_set_value(GTK_RANGE(g_tx_slider), saved_tx_level);
+
     return (in_idx >= 0 && out_idx >= 0);
 }
 
@@ -154,6 +162,16 @@ static void set_btn_state(bool capturing)
         gtk_style_context_add_class   (ctx, "start-btn");
         gtk_button_set_label(GTK_BUTTON(g_btn), "Start");
     }
+}
+
+/* ── TX level slider callback ──────────────────────────────────────────── */
+
+static void on_tx_level_changed(GtkRange* range, gpointer /*data*/)
+{
+    double pct = gtk_range_get_value(range);
+    float scale = static_cast<float>(pct / 100.0 * 32767.0);
+    if (g_encoder)
+        g_encoder->set_tx_scale(scale);
 }
 
 /* ── decoder control ───────────────────────────────────────────────────── */
@@ -726,6 +744,16 @@ static void activate(GtkApplication* app, gpointer /*data*/)
 
     g_meter_out = meter_widget_new();
     gtk_box_pack_start(GTK_BOX(meter_spec_hbox), g_meter_out, FALSE, FALSE, 0);
+
+    g_tx_slider = gtk_scale_new_with_range(GTK_ORIENTATION_VERTICAL, 0, 100, 1);
+    gtk_range_set_inverted(GTK_RANGE(g_tx_slider), TRUE);   /* 100 at top */
+    gtk_range_set_value(GTK_RANGE(g_tx_slider), 50);
+    gtk_scale_set_draw_value(GTK_SCALE(g_tx_slider), FALSE);
+    gtk_widget_set_size_request(g_tx_slider, 30, -1);
+    gtk_widget_set_tooltip_text(g_tx_slider, "TX output level");
+    g_signal_connect(g_tx_slider, "value-changed",
+                     G_CALLBACK(on_tx_level_changed), NULL);
+    gtk_box_pack_start(GTK_BOX(meter_spec_hbox), g_tx_slider, FALSE, FALSE, 0);
 
     gtk_box_pack_start(GTK_BOX(vbox), meter_spec_hbox, TRUE, TRUE, 0);
 

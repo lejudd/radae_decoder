@@ -33,6 +33,10 @@ public:
     float get_input_level()  const { return input_level_.load(std::memory_order_relaxed); }
     float get_output_level() const { return output_level_.load(std::memory_order_relaxed); }
 
+    /* TX output level (thread-safe) ----------------------------------------- */
+    void  set_tx_scale(float s) { tx_scale_.store(s, std::memory_order_relaxed); }
+    float get_tx_scale() const  { return tx_scale_.load(std::memory_order_relaxed); }
+
 private:
     void processing_loop();
 
@@ -59,4 +63,5 @@ private:
     std::atomic<bool>  running_      {false};
     std::atomic<float> input_level_  {0.0f};
     std::atomic<float> output_level_ {0.0f};
+    std::atomic<float> tx_scale_     {16384.0f};
 };
