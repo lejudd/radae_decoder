@@ -1,15 +1,17 @@
 # RADAE Decoder
 
-Originally from: https://github.com/peterbmarks/radae_decoder 
+Originally from: https://github.com/peterbmarks/radae_decoder
 
 Based on code from: https://github.com/drowe67/radae
 
-A real-time RADAE (Radio Autoencoder) decoder for Linux. Captures RADAE modem audio from an ALSA input device, decodes it using a neural OFDM demodulator and FARGAN vocoder, and plays the decoded speech on an ALSA output device. Includes a GTK3 level meter showing decoded audio levels, sync status, and SNR.
+A real-time RADAE (Radio Autoencoder) encoder and decoder for Linux. In receive (RX) mode it captures RADAE modem audio from an ALSA input device, decodes it using a neural OFDM demodulator and FARGAN vocoder, and plays the decoded speech on an ALSA output device. In transmit (TX) mode it captures speech from a microphone, extracts LPCNet features, encodes them with the RADE neural encoder, and outputs the OFDM modem signal to a radio. Includes a GTK3 UI with level meters, spectrum/waterfall displays, sync status, SNR, and a TX output level slider.
 
 ![Platform](https://img.shields.io/badge/Platform-Linux-blue) ![GTK3](https://img.shields.io/badge/GUI-GTK3-green) ![ALSA](https://img.shields.io/badge/Audio-ALSA-orange) ![RADAE](https://img.shields.io/badge/Codec-RADAE-purple)
 
 
 ![Screenshot](screenshot.png)
+
+![Settings](settings.png)
 
 [Video demo](https://youtu.be/Q1SExfmMqZ0?si=LSMlgETFaZ1H1Fn5)
 
@@ -19,19 +21,29 @@ not require python to run. It's (currently) a statically linked single binary of
 
 ## Features
 
+### Receive (RX)
 - **Real-time RADAE decoding** — Full receive pipeline: Hilbert transform, OFDM demodulation, neural decoder, FARGAN speech synthesis
 - **Dual device selection** — Pick any ALSA capture device (modem input) and playback device (decoded speech output)
 - **Automatic signal acquisition** — Searches for RADAE signal, locks on when found, re-acquires after signal loss
 - **Live status display** — Shows sync state, SNR (dB), and frequency offset (Hz) while decoding
-- **Input level meter** — Calibrated dB scale (-60 to 0 dB) with peak hold, showing input audio level
-- **Spectrum display** — Shows 4KHz of audio spectrum. With a RADAE signal you should see energy concentrated in the OFDM band around 1.3 kHz. 
+- **Open WAV file recording** — Decodes and plays a WAV file recording such as those from the FreeDV app
+
+### Transmit (TX)
+- **Real-time RADAE encoding** — Full transmit pipeline: microphone capture, LPCNet feature extraction, neural RADE encoder, OFDM modulation
+- **Dual device selection** — Pick any ALSA capture device (microphone) and playback device (radio transmit audio)
+- **TX output level slider** — Adjustable output level (0–100%) to set the drive level to the radio; saved across sessions
+- **End-of-over signalling** — Automatically sends an EOO frame when transmission stops
+
+### Common
+- **Input & output level meters** — Calibrated dB scale (-60 to 0 dB) with peak hold
+- **Spectrum display** — Shows 4 kHz of audio spectrum. With a RADAE signal you should see energy concentrated in the OFDM band around 1.3 kHz
 - **Waterfall display** — Same as the spectrum but with vertical history
-- **Output level meter** — Calibrated dB scale (-60 to 0 dB) with peak hold, showing decoded output levels
 - **Sample rate flexibility** — Accepts any ALSA-supported input/output rate; internally resamples to/from the 8 kHz modem and 16 kHz speech rates
-- **Open WAV file recording** — Decodes and plays a WAV file recording such as those from the FreeDV app.
+- **Settings persistence** — Device selections and TX level are saved to `~/.config/radae-decoder.conf`
 
 ## How it works
 
+### RX (Decode)
 ```
 ALSA Input (any rate, mono)
   -> Resample to 8 kHz
@@ -40,6 +52,19 @@ ALSA Input (any rate, mono)
   -> FARGAN vocoder -> 16 kHz mono speech
   -> Resample to output device rate
   -> ALSA Output
+```
+
+### TX (Encode)
+```
+ALSA Mic Input (any rate, mono)
+  -> Resample to 16 kHz
+  -> LPCNet feature extraction (36 features per 10 ms frame)
+  -> Accumulate 12 feature frames (120 ms)
+  -> RADE transmitter (neural encoder, OFDM modulation)
+  -> 960 complex IQ samples @ 8 kHz -> take real part
+  -> Scale by TX output level
+  -> Resample to output device rate
+  -> ALSA Radio Output
 ```
 
 The RADAE codec uses a 30-carrier OFDM waveform in ~1.3 kHz bandwidth. Each 120 ms modem frame produces 12 speech frames (10 ms each) via the neural decoder and FARGAN vocoder. Pilot symbols enable automatic frequency and timing synchronization.
@@ -102,7 +127,7 @@ cmake ..
 ./build/radae_decoder
 ```
 
-### First run
+### First run (RX)
 
 1. **Input dropdown** -- Select the ALSA capture device receiving the RADAE modem signal (e.g. a sound card connected to a radio receiver).
 2. **Output dropdown** -- Select the ALSA playback device for decoded speech (e.g. speakers or headphones).
@@ -113,6 +138,15 @@ cmake ..
 
 The chosen input and output audio device names are saved and loaded on launch. If both are found
 decoding will automatically start.
+
+### Transmitting (TX)
+
+1. Toggle the **TX switch** to enable transmit mode. The settings dialog gains TX-specific device selectors.
+2. **TX Input** -- Select the microphone capture device.
+3. **TX Output** -- Select the ALSA playback device connected to the radio transmitter.
+4. **TX level slider** -- Adjust the output drive level (right side of window). The setting is saved across sessions.
+5. Click **Start** to begin transmitting. The status bar shows "Transmitting..." and the meters show mic input and modem output levels.
+6. Click **Stop** to end the transmission; an end-of-over (EOO) frame is sent automatically.
 
 ### Permissions
 
@@ -134,8 +168,11 @@ radae_decoder/
 ├── src/
 │   ├── main.cpp                # GTK application, UI, event handlers
 │   ├── rade_decoder.h/cpp      # RADAE decode pipeline (capture -> decode -> playback)
+│   ├── rade_encoder.h/cpp      # RADAE encode pipeline (mic -> encode -> radio)
 │   ├── audio_input.h/cpp       # ALSA device enumeration
-│   └── meter_widget.h/cpp      # Cairo-based stereo bar meter widget
+│   ├── meter_widget.h/cpp      # Cairo-based bar meter widget
+│   ├── spectrum_widget.h/cpp   # Cairo-based spectrum display
+│   └── waterfall_widget.h/cpp  # Cairo-based waterfall display
 └── radae_nopy/                 # RADAE codec library (C, builds librade + opus)
     ├── CMakeLists.txt
     ├── cmake/BuildOpus.cmake   # Downloads & builds Opus with FARGAN/LPCNet
@@ -153,12 +190,13 @@ radae_decoder/
 | Module | Responsibility |
 |--------|---------------|
 | **rade_decoder** | Complete real-time decode pipeline: ALSA capture, resampling (any rate to 8 kHz), Hilbert transform (real to IQ), RADE receiver, FARGAN vocoder synthesis, resampling (16 kHz to output rate), ALSA playback. Runs on a dedicated thread with atomic status variables. |
+| **rade_encoder** | Complete real-time encode pipeline: ALSA mic capture, resampling (any rate to 16 kHz), LPCNet feature extraction, RADE transmitter (neural encoder + OFDM mod), resampling (8 kHz to output rate), ALSA playback to radio. Runs on a dedicated thread; TX output level controlled via atomic. |
 | **audio_input** | ALSA device enumeration (capture and playback devices) via `snd_card_next()` / `snd_ctl_pcm_next_device()` |
 | **meter_widget** | Custom `GtkDrawingArea` widget; redraws at ~30 fps using Cairo; converts linear RMS to logarithmic dB; green-to-red gradient fill; peak-hold with decay |
-| **main** | GTK application shell; connects signals; manages device combo boxes; starts/stops decoder; updates meter and status via GLib timer |
+| **main** | GTK application shell; connects signals; manages device combo boxes and TX level slider; starts/stops decoder/encoder; updates meters and status via GLib timer |
 | **radae_nopy (librade)** | RADAE codec C library: OFDM mod/demod, pilot acquisition, neural encoder/decoder (GRU+Conv), bandpass filter. Neural network weights compiled directly into the binary (~47 MB). |
 
-### Decode pipeline
+### Decode pipeline (RX)
 
 ```
 ALSA Input (hw:X,Y)
@@ -180,6 +218,29 @@ Linear interpolation resample (16 kHz -> output rate)
 snd_pcm_writei() -- ALSA playback, S16_LE mono
 ```
 
+### Encode pipeline (TX)
+
+```
+ALSA Mic Input (hw:X,Y)
+  | snd_pcm_readi() -- blocking read, S16_LE mono
+  v
+Linear interpolation resample (mic rate -> 16 kHz)
+  v
+lpcnet_compute_single_frame_features()
+  -> 36-float feature vector per 160 samples (10 ms)
+  v
+Accumulate 12 feature frames (432 floats, 120 ms)
+  v
+rade_tx() -- neural encoder, OFDM modulation
+  -> 960 RADE_COMP samples @ 8 kHz (120 ms)
+  v
+Take real part, scale by TX level slider
+  v
+Linear interpolation resample (8 kHz -> output rate)
+  v
+snd_pcm_writei() -- ALSA playback to radio, S16_LE mono
+```
+
 ### Sync state machine
 
 The RADE receiver has three states:
@@ -192,8 +253,9 @@ When sync is lost, the FARGAN vocoder is re-initialized so it can warm up cleanl
 
 ### Thread model
 
-- **Processing thread** (RadaeDecoder): Runs the entire capture-decode-playback loop
-- **GTK main thread**: Reads atomic status variables at 30 Hz, updates meter and status label
+- **RX processing thread** (RadaeDecoder): Runs the entire capture-decode-playback loop
+- **TX processing thread** (RadaeEncoder): Runs the entire mic-capture-encode-playback loop
+- **GTK main thread**: Reads atomic status variables at 30 Hz, updates meters, status label, and writes TX scale from the slider
 - **Synchronization**: `std::atomic<float>` / `std::atomic<bool>` with relaxed ordering (lock-free)
 
 ## Troubleshooting
