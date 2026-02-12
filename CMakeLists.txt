@@ -48,23 +48,25 @@ set_target_properties(rade PROPERTIES
 )
 
 # ── RADE utilities ───────────────────────────────────────────────────────────
-add_executable(lpcnet_demo src/lpcnet_demo.c)
-target_link_libraries(lpcnet_demo opus m)
+# Uncomment these to build the demo tools
 
-add_executable(radae_tx src/radae_tx.c)
-target_link_libraries(radae_tx rade opus m)
+# add_executable(lpcnet_demo src/tools/lpcnet_demo.c)
+# target_link_libraries(lpcnet_demo opus m)
 
-add_executable(radae_rx src/radae_rx.c)
-target_link_libraries(radae_rx rade opus m)
+# add_executable(radae_tx src/tools/radae_tx.c)
+# target_link_libraries(radae_tx rade opus m)
 
-add_executable(real2iq src/real2iq.c)
-target_link_libraries(real2iq m)
+# add_executable(radae_rx src/tools/radae_rx.c)
+# target_link_libraries(radae_rx rade opus m)
 
-add_executable(rade_demod src/rade_demod.c)
-target_link_libraries(rade_demod rade opus m)
+# add_executable(real2iq src/tools/real2iq.c)
+# target_link_libraries(real2iq m)
 
-add_executable(rade_modulate src/rade_modulate.c)
-target_link_libraries(rade_modulate rade opus m)
+# add_executable(rade_demod src/tools/rade_demod.c)
+# target_link_libraries(rade_demod rade opus m)
+
+# add_executable(rade_modulate src/tools/rade_modulate.c)
+# target_link_libraries(rade_modulate rade opus m)
 
 # ── GUI application ──────────────────────────────────────────────────────────
 add_executable(radae_decoder
@@ -99,5 +101,5 @@ target_link_libraries(radae_decoder
 
 target_compile_options(radae_decoder PRIVATE
     ${GTK_CFLAGS_OTHER}
-    -Wall -Wextra -Wpedantic
+    -Wall -Wextra -Wpedantic -Wno-dev
 )
