@@ -351,6 +351,27 @@ sox -t .s16 -r 16000 -c 1 - decoded.wav
 play decoded.wav
 ```
 
+### Decode 8kHz int-16 samples from stdin (for OpenWebRX)
+
+```
+./webrx_rade_decode -h
+usage: webrx_rade_decode [options]
+
+  Reads 16-bit signed mono audio at 8000 Hz from stdin,
+  decodes RADAE, and writes 16-bit signed mono audio
+  at 8000 Hz to stdout.
+
+options:
+  -h, --help     Show this help
+  -v LEVEL       Verbosity: 0=quiet  1=normal (default)  2=verbose
+```
+
+Test:
+```sox FDV_FromRadio_20260125-080557_local.wav \
+-t raw -b 16 -r 8000 -e signed-integer - | \
+./webrx_rade_decode |sox -t raw -r 8000 -b 16 -e signed-integer -c 1 - output.wav
+```
+
 ## Credits
 
 - RADAE codec by David Rowe ([github.com/drowe67](https://github.com/drowe67))
