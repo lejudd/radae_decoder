@@ -1,5 +1,6 @@
 #include "rade_encoder.h"
 
+#include <complex>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -80,6 +81,41 @@ static int resample_linear_stream(const float* in, int n_in,
     return n_out;
 }
 
+/* ── in-place radix-2 FFT ────────────────────────────────────────────── */
+
+static void fft_radix2(std::complex<float>* x, int N)
+{
+    for (int i = 1, j = 0; i < N; i++) {
+        int bit = N >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) std::swap(x[i], x[j]);
+    }
+    for (int len = 2; len <= N; len <<= 1) {
+        float ang = -2.0f * static_cast<float>(M_PI) / len;
+        std::complex<float> wlen(std::cos(ang), std::sin(ang));
+        for (int i = 0; i < N; i += len) {
+            std::complex<float> w(1.0f, 0.0f);
+            for (int j = 0; j < len / 2; j++) {
+                auto u = x[i + j];
+                auto v = x[i + j + len / 2] * w;
+                x[i + j]           = u + v;
+                x[i + j + len / 2] = u - v;
+                w *= wlen;
+            }
+        }
+    }
+}
+
+/* ── get_spectrum (thread-safe read) ─────────────────────────────────── */
+
+void RadaeEncoder::get_spectrum(float* out, int n) const
+{
+    std::lock_guard<std::mutex> lock(spectrum_mutex_);
+    int count = std::min(n, SPECTRUM_BINS);
+    std::memcpy(out, spectrum_mag_, static_cast<size_t>(count) * sizeof(float));
+}
+
 /* ── construction / destruction ──────────────────────────────────────── */
 
 RadaeEncoder::RadaeEncoder()  = default;
@@ -134,6 +170,11 @@ bool RadaeEncoder::open(const std::string& mic_hw_id,
     int n_eoo = rade_n_tx_eoo_out(rade_);
     rade_bpf_init(&bpf_, RADE_BPF_NTAP, static_cast<float>(RADE_FS),
                   1600.0f, 1500.0f, n_eoo);
+
+    /* ── FFT window (Hann) for TX output spectrum ────────────────────── */
+    for (int i = 0; i < FFT_SIZE; i++)
+        fft_window_[i] = 0.5f * (1.0f - std::cos(2.0f * static_cast<float>(M_PI)
+                                                   * i / (FFT_SIZE - 1)));
 
     return true;
 }
@@ -341,6 +382,27 @@ void RadaeEncoder::processing_loop()
                 int n_out = rade_tx(rade_, tx_out.data(), features.data());
                 if (bpf_enabled_.load(std::memory_order_relaxed))
                     rade_bpf_process(&bpf_, tx_out.data(), tx_out.data(), n_out);
+
+                /* FFT spectrum of TX output (real part, last FFT_SIZE samples) */
+                if (n_out >= FFT_SIZE) {
+                    std::complex<float> fft_buf[FFT_SIZE];
+                    int off = n_out - FFT_SIZE;
+                    for (int i = 0; i < FFT_SIZE; i++)
+                        fft_buf[i] = tx_out[static_cast<size_t>(off + i)].real
+                                     * fft_window_[i];
+                    fft_radix2(fft_buf, FFT_SIZE);
+                    float tmp[SPECTRUM_BINS];
+                    for (int i = 0; i < SPECTRUM_BINS; i++) {
+                        float mag = std::abs(fft_buf[i]) / (FFT_SIZE * 0.5f);
+                        tmp[i] = (mag > 1e-10f)
+                               ? 20.0f * std::log10(mag) : -200.0f;
+                    }
+                    {
+                        std::lock_guard<std::mutex> lock(spectrum_mutex_);
+                        std::memcpy(spectrum_mag_, tmp, sizeof(spectrum_mag_));
+                    }
+                }
+
                 write_real_to_pulse(pa_out_, tx_out.data(), n_out,
                                     RADE_FS, rate_out_,
                                     resamp_out_frac_, resamp_out_prev_,

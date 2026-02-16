@@ -9,9 +9,11 @@ A real-time RADAE (Radio Autoencoder) encoder and decoder for Linux. In receive 
 ![Platform](https://img.shields.io/badge/Platform-Linux-blue) ![GTK3](https://img.shields.io/badge/GUI-GTK3-green) ![PulseAudio](https://img.shields.io/badge/Audio-PulseAudio-orange) ![RADAE](https://img.shields.io/badge/Codec-RADAE-purple)
 
 
-![Screenshot](screenshot.png)
+![Screenshot](images/screenshot.png)
 
-![Settings](settings.png)
+![Settings](images/settings.png)
+
+![Transmit](images/bpf%20off.png)
 
 [Video demo](https://youtu.be/Q1SExfmMqZ0?si=LSMlgETFaZ1H1Fn5)
 

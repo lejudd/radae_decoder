@@ -221,6 +221,19 @@ static gboolean on_meter_tick(gpointer /*data*/)
             meter_widget_update(g_meter_in, g_encoder->get_input_level());
         if (g_meter_out)
             meter_widget_update(g_meter_out, g_encoder->get_output_level());
+
+        /* update spectrum and waterfall with TX output FFT */
+        {
+            float spec[RadaeEncoder::SPECTRUM_BINS];
+            g_encoder->get_spectrum(spec, RadaeEncoder::SPECTRUM_BINS);
+            if (g_spectrum)
+                spectrum_widget_update(g_spectrum, spec, RadaeEncoder::SPECTRUM_BINS,
+                                       g_encoder->spectrum_sample_rate());
+            if (g_waterfall)
+                waterfall_widget_update(g_waterfall, spec, RadaeEncoder::SPECTRUM_BINS,
+                                        g_encoder->spectrum_sample_rate());
+        }
+
         set_status("Transmitting\xe2\x80\xa6");
         return TRUE;
     }

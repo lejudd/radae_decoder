@@ -2,6 +2,7 @@
 
 #include <string>
 #include <atomic>
+#include <mutex>
 #include <thread>
 #include <pulse/simple.h>
 #include <pulse/error.h>
@@ -48,6 +49,13 @@ public:
     void set_bpf_enabled(bool en) { bpf_enabled_.store(en, std::memory_order_relaxed); }
     bool get_bpf_enabled() const  { return bpf_enabled_.load(std::memory_order_relaxed); }
 
+    /* spectrum of TX output (thread-safe via mutex) ------------------------- */
+    static constexpr int FFT_SIZE      = 512;
+    static constexpr int SPECTRUM_BINS = FFT_SIZE / 2;   // 256
+
+    void  get_spectrum(float* out, int n) const;
+    float spectrum_sample_rate() const { return 8000.f; }
+
 private:
     void processing_loop();
 
@@ -80,4 +88,9 @@ private:
 
     /* ── TX output bandpass filter ───────────────────────────────────────── */
     rade_bpf           bpf_;
+
+    /* ── FFT / spectrum of TX output ─────────────────────────────────────── */
+    float              fft_window_[FFT_SIZE]       = {};
+    float              spectrum_mag_[SPECTRUM_BINS] = {};
+    mutable std::mutex spectrum_mutex_;
 };
