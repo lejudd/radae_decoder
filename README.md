@@ -88,7 +88,8 @@ The RADAE codec uses a 30-carrier OFDM waveform in ~1.3 kHz bandwidth. Each 120 
 ```bash
 sudo apt-get install build-essential cmake \
   libgtk-3-dev libpulse-dev pkg-config \
-  autoconf automake libtool libhamlib++-dev libhamlib-dev
+  autoconf automake libtool libhamlib++-dev \
+  libhamlib-dev libpulse-dev
 ```
 
 ## Build Instructions
