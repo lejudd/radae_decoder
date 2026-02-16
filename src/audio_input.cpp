@@ -2,133 +2,148 @@
 
 #include <cmath>
 #include <vector>
+#include <pulse/pulseaudio.h>
 
 /* ── construction / destruction ──────────────────────────────────────────── */
 
 AudioInput::AudioInput()  = default;
 AudioInput::~AudioInput() { stop(); close(); }
 
-/* ── device enumeration ─────────────────────────────────────────────────── */
+/* ── device enumeration via PulseAudio introspection API ─────────────────── */
 
-static std::vector<AudioDevice> enumerate_devices_by_stream(snd_pcm_stream_t stream)
+struct EnumCtx {
+    std::vector<AudioDevice>* devices;
+    bool done;
+};
+
+static void source_info_cb(pa_context* /*c*/, const pa_source_info* i,
+                            int eol, void* userdata)
+{
+    auto* ctx = static_cast<EnumCtx*>(userdata);
+    if (eol > 0) { ctx->done = true; return; }
+    if (!i) return;
+    /* skip monitors (playback device loopbacks) */
+    if (i->monitor_of_sink != PA_INVALID_INDEX) return;
+
+    AudioDevice ad;
+    ad.name  = i->description ? i->description : i->name;
+    ad.hw_id = i->name;
+    ctx->devices->push_back(std::move(ad));
+}
+
+static void sink_info_cb(pa_context* /*c*/, const pa_sink_info* i,
+                          int eol, void* userdata)
+{
+    auto* ctx = static_cast<EnumCtx*>(userdata);
+    if (eol > 0) { ctx->done = true; return; }
+    if (!i) return;
+
+    AudioDevice ad;
+    ad.name  = i->description ? i->description : i->name;
+    ad.hw_id = i->name;
+    ctx->devices->push_back(std::move(ad));
+}
+
+static void context_state_cb(pa_context* c, void* userdata)
+{
+    auto* ready = static_cast<bool*>(userdata);
+    switch (pa_context_get_state(c)) {
+        case PA_CONTEXT_READY:
+        case PA_CONTEXT_FAILED:
+        case PA_CONTEXT_TERMINATED:
+            *ready = true;
+            break;
+        default:
+            break;
+    }
+}
+
+static std::vector<AudioDevice> enumerate_pa_devices(bool capture)
 {
     std::vector<AudioDevice> devices;
 
-    snd_ctl_card_info_t* card_info = nullptr;
-    snd_ctl_card_info_alloca(&card_info);
+    pa_mainloop* ml = pa_mainloop_new();
+    if (!ml) return devices;
 
-    snd_pcm_info_t* pcm_info = nullptr;
-    snd_pcm_info_alloca(&pcm_info);
+    pa_context* ctx = pa_context_new(pa_mainloop_get_api(ml), "radae-enum");
+    if (!ctx) { pa_mainloop_free(ml); return devices; }
 
-    int card = -1;                          // snd_card_next starts from -1
-    while (snd_card_next(&card) >= 0 && card >= 0) {
+    bool ready = false;
+    pa_context_set_state_callback(ctx, context_state_cb, &ready);
+    pa_context_connect(ctx, nullptr, PA_CONTEXT_NOFLAGS, nullptr);
 
-        char ctl_name[32];
-        snprintf(ctl_name, sizeof ctl_name, "hw:%d", card);
+    /* wait for connection */
+    while (!ready)
+        pa_mainloop_iterate(ml, 1, nullptr);
 
-        snd_ctl_t* ctl = nullptr;
-        if (snd_ctl_open(&ctl, ctl_name, 0) < 0) continue;
-
-        if (snd_ctl_card_info(ctl, card_info) < 0) {
-            snd_ctl_close(ctl);
-            continue;
-        }
-        const char* card_name = snd_ctl_card_info_get_name(card_info);
-
-        int device = -1;
-        while (snd_ctl_pcm_next_device(ctl, &device) >= 0 && device >= 0) {
-            snd_pcm_info_set_device   (pcm_info, static_cast<unsigned>(device));
-            snd_pcm_info_set_subdevice(pcm_info, 0);
-            snd_pcm_info_set_stream   (pcm_info, stream);
-
-            if (snd_ctl_pcm_info(ctl, pcm_info) < 0)
-                continue;                   // device doesn't support this stream type
-
-            AudioDevice ad;
-            ad.name  = std::string(card_name ? card_name : "Unknown")
-                     + "  \xe2\x80\x94  "          // em-dash UTF-8
-                     + snd_pcm_info_get_name(pcm_info);
-
-            char hw[32];
-            snprintf(hw, sizeof hw, "hw:%d,%d", card, device);
-            ad.hw_id = hw;
-
-            devices.push_back(std::move(ad));
-        }
-        snd_ctl_close(ctl);
+    if (pa_context_get_state(ctx) != PA_CONTEXT_READY) {
+        pa_context_unref(ctx);
+        pa_mainloop_free(ml);
+        return devices;
     }
+
+    EnumCtx ectx{&devices, false};
+    pa_operation* op;
+    if (capture)
+        op = pa_context_get_source_info_list(ctx, source_info_cb, &ectx);
+    else
+        op = pa_context_get_sink_info_list(ctx, sink_info_cb, &ectx);
+
+    while (!ectx.done)
+        pa_mainloop_iterate(ml, 1, nullptr);
+
+    if (op) pa_operation_unref(op);
+    pa_context_disconnect(ctx);
+    pa_context_unref(ctx);
+    pa_mainloop_free(ml);
+
     return devices;
 }
 
 std::vector<AudioDevice> AudioInput::enumerate_devices()
 {
-    return enumerate_devices_by_stream(SND_PCM_STREAM_CAPTURE);
+    return enumerate_pa_devices(true);
 }
 
 std::vector<AudioDevice> AudioInput::enumerate_playback_devices()
 {
-    return enumerate_devices_by_stream(SND_PCM_STREAM_PLAYBACK);
+    return enumerate_pa_devices(false);
 }
 
 /* ── open / close ───────────────────────────────────────────────────────── */
 
 bool AudioInput::open(const std::string& hw_id)
 {
-    close();                                // tidy up any previous handle
+    close();
 
-    if (snd_pcm_open(&pcm_, hw_id.c_str(), SND_PCM_STREAM_CAPTURE, 0) < 0)
-        return false;
+    pa_sample_spec ss{};
+    ss.format   = PA_SAMPLE_S16LE;
+    ss.rate     = 44100;
+    ss.channels = 2;
 
-    /* ── hardware parameters ─────────────────────────────────────────── */
-    snd_pcm_hw_params_t* hw = nullptr;
-    snd_pcm_hw_params_alloca(&hw);
-
-    if (snd_pcm_hw_params_any(pcm_, hw) < 0) goto fail;
-
-    if (snd_pcm_hw_params_set_access(pcm_, hw, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
-        goto fail;
-    if (snd_pcm_hw_params_set_format(pcm_, hw, SND_PCM_FORMAT_S16_LE) < 0)
-        goto fail;
-
-    {   /* channels: prefer stereo, fall back to mono */
-        unsigned int max_ch = 0;
-        snd_pcm_hw_params_get_channels_max(hw, &max_ch);
-        channels_ = (max_ch >= 2) ? 2 : 1;
-        if (snd_pcm_hw_params_set_channels(pcm_, hw, static_cast<unsigned>(channels_)) < 0)
-            goto fail;
+    int error = 0;
+    pa_ = pa_simple_new(nullptr, "RADAE Decoder", PA_STREAM_RECORD,
+                        hw_id.c_str(), "level-meter",
+                        &ss, nullptr, nullptr, &error);
+    if (!pa_) {
+        /* fall back to mono */
+        ss.channels = 1;
+        pa_ = pa_simple_new(nullptr, "RADAE Decoder", PA_STREAM_RECORD,
+                            hw_id.c_str(), "level-meter",
+                            &ss, nullptr, nullptr, &error);
     }
+    if (!pa_) return false;
 
-    {   /* sample-rate: 44100 Hz */
-        unsigned int rate = 44100;
-        if (snd_pcm_hw_params_set_rate_near(pcm_, hw, &rate, nullptr) < 0)
-            goto fail;
-    }
-
-    {   /* period / buffer sizes — target ~11 ms period for responsive metering */
-        snd_pcm_uframes_t period = 512;
-        snd_pcm_uframes_t buffer = 2048;
-        snd_pcm_hw_params_set_period_size_near(pcm_, hw, &period, nullptr);
-        snd_pcm_hw_params_set_buffer_size_near(pcm_, hw, &buffer);
-    }
-
-    if (snd_pcm_hw_params(pcm_, hw) < 0) goto fail;
-    if (snd_pcm_prepare(pcm_)        < 0) goto fail;
-
+    channels_ = ss.channels;
     return true;
-
-fail:
-    snd_pcm_close(pcm_);
-    pcm_      = nullptr;
-    channels_ = 0;
-    return false;
 }
 
 void AudioInput::close()
 {
     stop();
-    if (pcm_) {
-        snd_pcm_close(pcm_);
-        pcm_      = nullptr;
+    if (pa_) {
+        pa_simple_free(pa_);
+        pa_       = nullptr;
         channels_ = 0;
     }
     level_left_  = 0.0f;
@@ -139,7 +154,7 @@ void AudioInput::close()
 
 void AudioInput::start()
 {
-    if (!pcm_ || running_) return;
+    if (!pa_ || running_) return;
     running_ = true;
     thread_  = std::thread(&AudioInput::capture_loop, this);
 }
@@ -148,8 +163,6 @@ void AudioInput::stop()
 {
     if (!running_) return;
     running_ = false;
-
-    if (pcm_) snd_pcm_drop(pcm_);       // unblock a pending readi()
 
     if (thread_.joinable()) thread_.join();
 
@@ -161,35 +174,32 @@ void AudioInput::stop()
 
 void AudioInput::capture_loop()
 {
-    constexpr snd_pcm_uframes_t READ_FRAMES = 512;
-    std::vector<int16_t> buf(READ_FRAMES * static_cast<unsigned>(channels_));
+    constexpr int READ_FRAMES = 512;
+    std::vector<int16_t> buf(READ_FRAMES * channels_);
 
     while (running_.load(std::memory_order_relaxed)) {
 
-        snd_pcm_sframes_t n = snd_pcm_readi(pcm_, buf.data(), READ_FRAMES);
-
-        /* ── error handling ────────────────────────────────────────── */
-        if (n < 0) {
-            if (n == -EINTR) continue;                      // signal — retry
-            if (!running_.load(std::memory_order_relaxed))  // shutting down
-                break;
-            n = snd_pcm_recover(pcm_, static_cast<int>(n), 0);
-            if (n < 0) break;                               // unrecoverable
+        int error = 0;
+        int ret = pa_simple_read(pa_, buf.data(),
+                                 buf.size() * sizeof(int16_t), &error);
+        if (ret < 0) {
+            if (!running_.load(std::memory_order_relaxed)) break;
             continue;
         }
-        if (n == 0) continue;
+
+        int n = READ_FRAMES;
 
         /* ── per-channel RMS ───────────────────────────────────────── */
         double sum_l = 0.0, sum_r = 0.0;
 
         if (channels_ == 1) {
-            for (snd_pcm_sframes_t i = 0; i < n; ++i) {
+            for (int i = 0; i < n; ++i) {
                 double s = buf[i] / 32768.0;
                 sum_l   += s * s;
             }
-            sum_r = sum_l;                  // duplicate mono → both channels
+            sum_r = sum_l;
         } else {
-            for (snd_pcm_sframes_t i = 0; i < n; ++i) {
+            for (int i = 0; i < n; ++i) {
                 double l = buf[i * 2]     / 32768.0;
                 double r = buf[i * 2 + 1] / 32768.0;
                 sum_l   += l * l;

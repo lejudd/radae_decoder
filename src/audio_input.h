@@ -4,13 +4,14 @@
 #include <vector>
 #include <atomic>
 #include <thread>
-#include <alsa/asoundlib.h>
+#include <pulse/simple.h>
+#include <pulse/error.h>
 
 /* ── public types ───────────────────────────────────────────────────────── */
 
 struct AudioDevice {
-    std::string name;   // human-readable  e.g. "Built-in Audio — Microphone"
-    std::string hw_id;  // ALSA identifier e.g. "hw:0,0"
+    std::string name;      // human-readable  e.g. "Built-in Audio Analog Stereo"
+    std::string hw_id;     // PulseAudio source/sink name e.g. "alsa_input.pci-..."
 };
 
 /* ── AudioInput ─────────────────────────────────────────────────────────── */
@@ -39,7 +40,7 @@ public:
 private:
     void capture_loop();
 
-    snd_pcm_t*         pcm_         = nullptr;
+    pa_simple*         pa_          = nullptr;
     int                channels_    = 0;
     std::thread        thread_;
     std::atomic<bool>  running_     {false};

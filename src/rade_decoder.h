@@ -5,7 +5,8 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
-#include <alsa/asoundlib.h>
+#include <pulse/simple.h>
+#include <pulse/error.h>
 
 /* Forward declaration — avoids exposing RADE/FARGAN C headers in this header */
 struct rade;
@@ -13,7 +14,7 @@ struct rade;
 /* ── RadaeDecoder ──────────────────────────────────────────────────────────
  *
  *  Real-time RADAE decoder pipeline:
- *    ALSA capture → resample → Hilbert → RADE Rx → FARGAN → resample → ALSA playback
+ *    PulseAudio capture → resample → Hilbert → RADE Rx → FARGAN → resample → PulseAudio playback
  *
  *  All processing runs on a dedicated thread.  Status is exposed via atomics.
  * ──────────────────────────────────────────────────────────────────────── */
@@ -50,11 +51,11 @@ public:
 private:
     void processing_loop();
 
-    /* ── ALSA handles ─────────────────────────────────────────────────────── */
-    snd_pcm_t*   pcm_in_   = nullptr;
-    snd_pcm_t*   pcm_out_  = nullptr;
-    unsigned int  rate_in_  = 0;   // negotiated capture rate
-    unsigned int  rate_out_ = 0;   // negotiated playback rate
+    /* ── PulseAudio handles ───────────────────────────────────────────────── */
+    pa_simple*   pa_in_   = nullptr;
+    pa_simple*   pa_out_  = nullptr;
+    unsigned int rate_in_  = 0;   // capture rate
+    unsigned int rate_out_ = 0;   // playback rate
 
     /* ── RADE receiver (opaque) ───────────────────────────────────────────── */
     struct rade*  rade_     = nullptr;

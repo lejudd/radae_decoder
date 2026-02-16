@@ -3,7 +3,8 @@
 #include <string>
 #include <atomic>
 #include <thread>
-#include <alsa/asoundlib.h>
+#include <pulse/simple.h>
+#include <pulse/error.h>
 
 /* Forward declarations — avoids exposing C headers in this header */
 struct rade;
@@ -12,7 +13,7 @@ struct LPCNetEncState;
 /* ── RadaeEncoder ──────────────────────────────────────────────────────────
  *
  *  Real-time RADAE encoder pipeline:
- *    ALSA capture (mic 16 kHz) → LPCNet features → RADE Tx → real → ALSA playback (radio 8 kHz)
+ *    PulseAudio capture (mic 16 kHz) → LPCNet features → RADE Tx → real → PulseAudio playback (radio 8 kHz)
  *
  *  All processing runs on a dedicated thread.  Status is exposed via atomics.
  * ──────────────────────────────────────────────────────────────────────── */
@@ -42,11 +43,11 @@ public:
 private:
     void processing_loop();
 
-    /* ── ALSA handles ─────────────────────────────────────────────────────── */
-    snd_pcm_t*   pcm_in_   = nullptr;    // capture (mic)
-    snd_pcm_t*   pcm_out_  = nullptr;    // playback (radio)
-    unsigned int  rate_in_  = 0;          // negotiated capture rate
-    unsigned int  rate_out_ = 0;          // negotiated playback rate
+    /* ── PulseAudio handles ───────────────────────────────────────────────── */
+    pa_simple*   pa_in_   = nullptr;    // capture (mic)
+    pa_simple*   pa_out_  = nullptr;    // playback (radio)
+    unsigned int rate_in_  = 0;          // capture rate
+    unsigned int rate_out_ = 0;          // playback rate
 
     /* ── RADE transmitter (opaque) ────────────────────────────────────────── */
     struct rade*        rade_    = nullptr;
