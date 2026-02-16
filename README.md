@@ -125,7 +125,7 @@ cmake ..
 ## Usage
 
 ```bash
-./build/radae_decoder
+./build/RADAE_Gui
 ```
 
 ### First run (RX)
