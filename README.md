@@ -32,6 +32,7 @@ not require python to run. It's (currently) a statically linked single binary of
 - **Real-time RADAE encoding** — Full transmit pipeline: microphone capture, LPCNet feature extraction, neural RADE encoder, OFDM modulation
 - **Dual device selection** — Pick any PulseAudio capture device (microphone) and playback device (radio transmit audio)
 - **TX output level slider** — Adjustable output level (0–100%) to set the drive level to the radio; saved across sessions
+- **TX bandpass filter** — Switchable 700–2300 Hz bandpass filter on the TX output, applied just before the audio is sent to the radio. Uses a 101-tap FIR filter at 8 kHz to sharply limit the transmitted bandwidth. Toggled via the BPF switch in the main window; setting is saved across sessions
 - **End-of-over signalling** — Automatically sends an EOO frame when transmission stops
 
 ### Common
@@ -58,8 +59,9 @@ PulseAudio Mic Input (16 kHz mono)
   -> LPCNet feature extraction (36 features per 10 ms frame)
   -> Accumulate 12 feature frames (120 ms)
   -> RADE transmitter (neural encoder, OFDM modulation)
-  -> 960 complex IQ samples @ 8 kHz -> take real part
-  -> Scale by TX output level
+  -> 960 complex IQ samples @ 8 kHz
+  -> [Optional] 700–2300 Hz bandpass filter (101-tap FIR, toggled by BPF switch)
+  -> Take real part, scale by TX output level
   -> PulseAudio Radio Output
 ```
 
@@ -142,8 +144,9 @@ decoding will automatically start.
 2. **TX Input** -- Select the microphone capture device.
 3. **TX Output** -- Select the PulseAudio playback device connected to the radio transmitter.
 4. **TX level slider** -- Adjust the output drive level (right side of window). The setting is saved across sessions.
-5. Click **Start** to begin transmitting. The status bar shows "Transmitting..." and the meters show mic input and modem output levels.
-6. Click **Stop** to end the transmission; an end-of-over (EOO) frame is sent automatically.
+5. **BPF switch** -- Toggle the 700–2300 Hz bandpass filter on the TX output. This limits the transmitted bandwidth to the SSB passband. The setting is saved across sessions.
+6. Click **Start** to begin transmitting. The status bar shows "Transmitting..." and the meters show mic input and modem output levels.
+7. Click **Stop** to end the transmission; an end-of-over (EOO) frame is sent automatically.
 
 ### Permissions
 
@@ -219,6 +222,8 @@ Accumulate 12 feature frames (432 floats, 120 ms)
   v
 rade_tx() -- neural encoder, OFDM modulation
   -> 960 RADE_COMP samples @ 8 kHz (120 ms)
+  v
+[Optional] rade_bpf_process() -- 700-2300 Hz BPF (101-tap FIR, toggled by BPF switch)
   v
 Take real part, scale by TX level slider
   v
