@@ -14,7 +14,6 @@ set(ENV{PKG_CONFIG_PATH} "/usr/lib/x86_64-linux-gnu/pkgconfig")
 
 pkg_check_modules(GTK    REQUIRED gtk+-3.0)
 pkg_check_modules(PULSE  REQUIRED libpulse-simple libpulse)
-pkg_check_modules(HAMLIB REQUIRED hamlib)
 
 # ── Opus (with FARGAN/LPCNet support) ────────────────────────────────────────
 include(cmake/BuildOpus.cmake)
@@ -85,7 +84,6 @@ add_executable(RADAE_Gui
 target_include_directories(RADAE_Gui PRIVATE
     ${GTK_INCLUDE_DIRS}
     ${PULSE_INCLUDE_DIRS}
-    ${HAMLIB_INCLUDE_DIRS}
     ${OPUS_SOURCE_DIR}/dnn
     ${OPUS_SOURCE_DIR}/celt
     ${OPUS_SOURCE_DIR}/include
@@ -98,7 +96,6 @@ target_link_libraries(RADAE_Gui
     m
     ${GTK_LIBRARIES}
     ${PULSE_LIBRARIES}
-    ${HAMLIB_LIBRARIES}
     Threads::Threads
 )
 
