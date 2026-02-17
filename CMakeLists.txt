@@ -70,6 +70,28 @@ set_target_properties(rade PROPERTIES
 add_executable(webrx_rade_decode src/tools/webrx_rade_decode.c)
 target_link_libraries(webrx_rade_decode rade opus m)
 
+add_executable(radae_headless
+    src/tools/radae_headless.cpp
+    src/audio_input.cpp
+    src/rade_decoder.cpp
+    src/rade_encoder.cpp
+)
+target_link_libraries(radae_headless
+    rade
+    opus
+    m
+    ${PULSE_LIBRARIES}
+    Threads::Threads
+)
+target_include_directories(radae_headless PRIVATE
+    ${PULSE_INCLUDE_DIRS}
+    ${OPUS_SOURCE_DIR}/dnn
+    ${OPUS_SOURCE_DIR}/celt
+    ${OPUS_SOURCE_DIR}/include
+    ${OPUS_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
 # ── GUI application ──────────────────────────────────────────────────────────
 add_executable(RADAE_Gui
     src/main.cpp
