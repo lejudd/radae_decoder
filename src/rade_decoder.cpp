@@ -199,44 +199,6 @@ void RadaeDecoder::get_spectrum(float* out, int n) const
     std::memcpy(out, spectrum_mag_, static_cast<size_t>(count) * sizeof(float));
 }
 
-/* ── PortAudio helper: open a stream ─────────────────────────────────── */
-
-static PaStream* open_portaudio(const std::string& dev_str, bool is_input,
-                                 unsigned int rate, unsigned long frames_per_buf)
-{
-    PaDeviceIndex dev = static_cast<PaDeviceIndex>(std::stoi(dev_str));
-    const PaDeviceInfo* info = Pa_GetDeviceInfo(dev);
-    if (!info) return nullptr;
-
-    PaStreamParameters params{};
-    params.device                    = dev;
-    params.channelCount              = 1;
-    params.sampleFormat              = paInt16;
-    params.suggestedLatency          = is_input ? info->defaultLowInputLatency
-                                                : info->defaultHighOutputLatency;
-    params.hostApiSpecificStreamInfo = nullptr;
-
-    PaStream* stream = nullptr;
-    PaError err = Pa_OpenStream(
-        &stream,
-        is_input  ? &params : nullptr,
-        !is_input ? &params : nullptr,
-        static_cast<double>(rate),
-        frames_per_buf,
-        paClipOff,
-        nullptr, nullptr);
-
-    if (err != paNoError) return nullptr;
-
-    err = Pa_StartStream(stream);
-    if (err != paNoError) {
-        Pa_CloseStream(stream);
-        return nullptr;
-    }
-
-    return stream;
-}
-
 /* ── open / close ────────────────────────────────────────────────────── */
 
 bool RadaeDecoder::open(const std::string& input_hw_id,
@@ -244,17 +206,15 @@ bool RadaeDecoder::open(const std::string& input_hw_id,
 {
     close();
 
-    /* ── PortAudio capture (mono, 8 kHz) ──────────────────────────── */
+    /* ── audio capture (mono, 8 kHz) ────────────────────────────────── */
     rate_in_ = RADE_FS;
-    pa_in_ = open_portaudio(input_hw_id, true, rate_in_, 512);
-    if (!pa_in_)
+    if (!stream_in_.open(input_hw_id, true, 1, rate_in_, 512))
         return false;
 
-    /* ── PortAudio playback (mono, 16 kHz) ────────────────────────── */
+    /* ── audio playback (mono, 16 kHz) ───────────────────────────────── */
     rate_out_ = RADE_FS_SPEECH;
-    pa_out_ = open_portaudio(output_hw_id, false, rate_out_, 512);
-    if (!pa_out_) {
-        Pa_StopStream(pa_in_); Pa_CloseStream(pa_in_); pa_in_ = nullptr;
+    if (!stream_out_.open(output_hw_id, false, 1, rate_out_, 512)) {
+        stream_in_.close();
         return false;
     }
 
@@ -262,8 +222,8 @@ bool RadaeDecoder::open(const std::string& input_hw_id,
     rade_initialize();
     rade_ = rade_open(nullptr, RADE_VERBOSE_0);
     if (!rade_) {
-        Pa_StopStream(pa_in_);  Pa_CloseStream(pa_in_);  pa_in_  = nullptr;
-        Pa_StopStream(pa_out_); Pa_CloseStream(pa_out_); pa_out_ = nullptr;
+        stream_in_.close();
+        stream_out_.close();
         return false;
     }
 
@@ -320,17 +280,16 @@ bool RadaeDecoder::open_file(const std::string& wav_path,
     if (file_audio_8k_.empty()) return false;
     file_pos_ = 0;
 
-    /* ── PortAudio playback only (no capture) ────────────────────── */
+    /* ── audio playback only (no capture) ─────────────────────────── */
     rate_out_ = RADE_FS_SPEECH;
-    pa_out_ = open_portaudio(output_hw_id, false, rate_out_, 512);
-    if (!pa_out_)
+    if (!stream_out_.open(output_hw_id, false, 1, rate_out_, 512))
         return false;
 
     /* ── RADE receiver ──────────────────────────────────────────── */
     rade_initialize();
     rade_ = rade_open(nullptr, RADE_VERBOSE_0);
     if (!rade_) {
-        Pa_StopStream(pa_out_); Pa_CloseStream(pa_out_); pa_out_ = nullptr;
+        stream_out_.close();
         return false;
     }
 
@@ -365,8 +324,8 @@ void RadaeDecoder::close()
     if (rade_) { rade_close(rade_); rade_ = nullptr; }
     if (fargan_) { delete static_cast<FARGANState*>(fargan_); fargan_ = nullptr; }
 
-    if (pa_in_)  { Pa_StopStream(pa_in_);  Pa_CloseStream(pa_in_);  pa_in_  = nullptr; }
-    if (pa_out_) { Pa_StopStream(pa_out_); Pa_CloseStream(pa_out_); pa_out_ = nullptr; }
+    stream_in_.close();
+    stream_out_.close();
 
     file_audio_8k_.clear();
     file_audio_8k_.shrink_to_fit();
@@ -384,7 +343,7 @@ void RadaeDecoder::close()
 
 void RadaeDecoder::start()
 {
-    if ((!pa_in_ && !file_mode_) || !pa_out_ || !rade_ || running_) return;
+    if ((!stream_in_.is_open() && !file_mode_) || !stream_out_.is_open() || !rade_ || running_) return;
     running_ = true;
     thread_  = std::thread(&RadaeDecoder::processing_loop, this);
 }
@@ -535,9 +494,9 @@ void RadaeDecoder::processing_loop()
                               file_audio_8k_.begin() + static_cast<ptrdiff_t>(file_pos_ + chunk));
                 file_pos_ += chunk;
             } else {
-                /* ── live mode: read from PortAudio capture ────────── */
-                PaError err = Pa_ReadStream(pa_in_, capture_buf.data(), READ_FRAMES);
-                if (err != paNoError && err != paInputOverflowed) {
+                /* ── live mode: read from audio capture ──────────────── */
+                AudioError err = stream_in_.read(capture_buf.data(), READ_FRAMES);
+                if (err == AUDIO_ERROR) {
                     if (!running_.load(std::memory_order_relaxed)) break;
                     continue;
                 }
@@ -663,8 +622,8 @@ void RadaeDecoder::processing_loop()
                             int prefill = 2 * 12 * LPCNET_FRAME_SIZE
                                 * static_cast<int>(rate_out_) / RADE_FS_SPEECH;
                             std::vector<int16_t> silence(static_cast<size_t>(prefill), 0);
-                            Pa_WriteStream(pa_out_, silence.data(),
-                                           static_cast<unsigned long>(prefill));
+                            stream_out_.write(silence.data(),
+                                              static_cast<unsigned long>(prefill));
                             output_primed = true;
                         }
                     }
@@ -702,9 +661,9 @@ void RadaeDecoder::processing_loop()
                         std::floor(0.5 + static_cast<double>(v)));
                 }
 
-                /* write to PortAudio output */
-                Pa_WriteStream(pa_out_, out_pcm.data(),
-                               static_cast<unsigned long>(n_resamp));
+                /* write to audio output */
+                stream_out_.write(out_pcm.data(),
+                                  static_cast<unsigned long>(n_resamp));
             }
 
             /* update output level */

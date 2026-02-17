@@ -4,14 +4,7 @@
 #include <vector>
 #include <atomic>
 #include <thread>
-#include <portaudio.h>
-
-/* ── public types ───────────────────────────────────────────────────────── */
-
-struct AudioDevice {
-    std::string name;      // human-readable  e.g. "Built-in Microphone"
-    std::string hw_id;     // PortAudio device index as string e.g. "3"
-};
+#include "audio_stream.h"
 
 /* ── AudioInput ─────────────────────────────────────────────────────────── */
 
@@ -39,7 +32,7 @@ public:
 private:
     void capture_loop();
 
-    PaStream*          stream_      = nullptr;
+    AudioStream        stream_;
     int                channels_    = 0;
     std::thread        thread_;
     std::atomic<bool>  running_     {false};

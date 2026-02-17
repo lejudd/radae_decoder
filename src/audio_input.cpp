@@ -2,45 +2,22 @@
 
 #include <cmath>
 #include <vector>
-#include <portaudio.h>
 
 /* ── construction / destruction ──────────────────────────────────────────── */
 
 AudioInput::AudioInput()  = default;
 AudioInput::~AudioInput() { stop(); close(); }
 
-/* ── device enumeration via PortAudio ────────────────────────────────────── */
+/* ── device enumeration ──────────────────────────────────────────────────── */
 
 std::vector<AudioDevice> AudioInput::enumerate_devices()
 {
-    std::vector<AudioDevice> devices;
-    int count = Pa_GetDeviceCount();
-    for (int i = 0; i < count; i++) {
-        const PaDeviceInfo* info = Pa_GetDeviceInfo(i);
-        if (!info || info->maxInputChannels <= 0) continue;
-
-        AudioDevice ad;
-        ad.name  = info->name;
-        ad.hw_id = std::to_string(i);
-        devices.push_back(std::move(ad));
-    }
-    return devices;
+    return audio_enumerate_capture_devices();
 }
 
 std::vector<AudioDevice> AudioInput::enumerate_playback_devices()
 {
-    std::vector<AudioDevice> devices;
-    int count = Pa_GetDeviceCount();
-    for (int i = 0; i < count; i++) {
-        const PaDeviceInfo* info = Pa_GetDeviceInfo(i);
-        if (!info || info->maxOutputChannels <= 0) continue;
-
-        AudioDevice ad;
-        ad.name  = info->name;
-        ad.hw_id = std::to_string(i);
-        devices.push_back(std::move(ad));
-    }
-    return devices;
+    return audio_enumerate_playback_devices();
 }
 
 /* ── open / close ───────────────────────────────────────────────────────── */
@@ -49,51 +26,23 @@ bool AudioInput::open(const std::string& hw_id)
 {
     close();
 
-    PaDeviceIndex dev = static_cast<PaDeviceIndex>(std::stoi(hw_id));
-    const PaDeviceInfo* info = Pa_GetDeviceInfo(dev);
-    if (!info) return false;
-
-    int ch = (info->maxInputChannels >= 2) ? 2 : 1;
-
-    PaStreamParameters params{};
-    params.device                    = dev;
-    params.channelCount              = ch;
-    params.sampleFormat              = paInt16;
-    params.suggestedLatency          = info->defaultLowInputLatency;
-    params.hostApiSpecificStreamInfo = nullptr;
-
-    PaError err = Pa_OpenStream(&stream_, &params, nullptr,
-                                44100.0, 512, paClipOff,
-                                nullptr, nullptr);
-    if (err != paNoError && ch == 2) {
+    /* try stereo first, fall back to mono */
+    int ch = 2;
+    if (!stream_.open(hw_id, true, ch, 44100, 512)) {
         ch = 1;
-        params.channelCount = 1;
-        err = Pa_OpenStream(&stream_, &params, nullptr,
-                            44100.0, 512, paClipOff,
-                            nullptr, nullptr);
+        if (!stream_.open(hw_id, true, ch, 44100, 512))
+            return false;
     }
-    if (err != paNoError) { stream_ = nullptr; return false; }
 
     channels_ = ch;
-
-    err = Pa_StartStream(stream_);
-    if (err != paNoError) {
-        Pa_CloseStream(stream_); stream_ = nullptr;
-        return false;
-    }
-
     return true;
 }
 
 void AudioInput::close()
 {
     stop();
-    if (stream_) {
-        Pa_StopStream(stream_);
-        Pa_CloseStream(stream_);
-        stream_   = nullptr;
-        channels_ = 0;
-    }
+    stream_.close();
+    channels_ = 0;
     level_left_  = 0.0f;
     level_right_ = 0.0f;
 }
@@ -102,7 +51,7 @@ void AudioInput::close()
 
 void AudioInput::start()
 {
-    if (!stream_ || running_) return;
+    if (!stream_.is_open() || running_) return;
     running_ = true;
     thread_  = std::thread(&AudioInput::capture_loop, this);
 }
@@ -127,8 +76,8 @@ void AudioInput::capture_loop()
 
     while (running_.load(std::memory_order_relaxed)) {
 
-        PaError err = Pa_ReadStream(stream_, buf.data(), READ_FRAMES);
-        if (err != paNoError && err != paInputOverflowed) {
+        AudioError err = stream_.read(buf.data(), READ_FRAMES);
+        if (err == AUDIO_ERROR) {
             if (!running_.load(std::memory_order_relaxed)) break;
             continue;
         }

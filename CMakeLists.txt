@@ -10,9 +10,23 @@ find_package(PkgConfig  REQUIRED)
 find_package(Threads    REQUIRED)
 
 pkg_check_modules(GTK       REQUIRED gtk+-3.0)
-pkg_check_modules(PORTAUDIO REQUIRED portaudio-2.0)
 
-link_directories(${GTK_LIBRARY_DIRS} ${PORTAUDIO_LIBRARY_DIRS})
+# ── audio backend: PortAudio on macOS, PulseAudio on Linux ───────────────────
+if(APPLE)
+    pkg_check_modules(PORTAUDIO REQUIRED portaudio-2.0)
+    set(AUDIO_BACKEND_SRC    src/audio_stream_portaudio.cpp)
+    set(AUDIO_BACKEND_LIBS   ${PORTAUDIO_LIBRARIES})
+    set(AUDIO_BACKEND_INCS   ${PORTAUDIO_INCLUDE_DIRS})
+    link_directories(${PORTAUDIO_LIBRARY_DIRS})
+else()
+    pkg_check_modules(PULSE REQUIRED libpulse libpulse-simple)
+    set(AUDIO_BACKEND_SRC    src/audio_stream_pulse.cpp)
+    set(AUDIO_BACKEND_LIBS   ${PULSE_LIBRARIES})
+    set(AUDIO_BACKEND_INCS   ${PULSE_INCLUDE_DIRS})
+    link_directories(${PULSE_LIBRARY_DIRS})
+endif()
+
+link_directories(${GTK_LIBRARY_DIRS})
 
 # ── Opus (with FARGAN/LPCNet support) ────────────────────────────────────────
 include(cmake/BuildOpus.cmake)
@@ -74,16 +88,17 @@ add_executable(radae_headless
     src/audio_input.cpp
     src/rade_decoder.cpp
     src/rade_encoder.cpp
+    ${AUDIO_BACKEND_SRC}
 )
 target_link_libraries(radae_headless
     rade
     opus
     m
-    ${PORTAUDIO_LIBRARIES}
+    ${AUDIO_BACKEND_LIBS}
     Threads::Threads
 )
 target_include_directories(radae_headless PRIVATE
-    ${PORTAUDIO_INCLUDE_DIRS}
+    ${AUDIO_BACKEND_INCS}
     ${OPUS_SOURCE_DIR}/dnn
     ${OPUS_SOURCE_DIR}/celt
     ${OPUS_SOURCE_DIR}/include
@@ -100,11 +115,12 @@ add_executable(RADAE_Gui
     src/rade_encoder.cpp
     src/spectrum_widget.cpp
     src/waterfall_widget.cpp
+    ${AUDIO_BACKEND_SRC}
 )
 
 target_include_directories(RADAE_Gui PRIVATE
     ${GTK_INCLUDE_DIRS}
-    ${PORTAUDIO_INCLUDE_DIRS}
+    ${AUDIO_BACKEND_INCS}
     ${OPUS_SOURCE_DIR}/dnn
     ${OPUS_SOURCE_DIR}/celt
     ${OPUS_SOURCE_DIR}/include
@@ -116,7 +132,7 @@ target_link_libraries(RADAE_Gui
     opus
     m
     ${GTK_LIBRARIES}
-    ${PORTAUDIO_LIBRARIES}
+    ${AUDIO_BACKEND_LIBS}
     Threads::Threads
 )
 

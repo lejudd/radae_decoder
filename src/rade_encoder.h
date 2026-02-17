@@ -4,7 +4,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
-#include <portaudio.h>
+#include "audio_stream.h"
 
 /* Forward declarations — avoids exposing C headers in this header */
 struct rade;
@@ -58,9 +58,9 @@ public:
 private:
     void processing_loop();
 
-    /* ── PortAudio handles ───────────────────────────────────────────────── */
-    PaStream*    pa_in_   = nullptr;    // capture (mic)
-    PaStream*    pa_out_  = nullptr;    // playback (radio)
+    /* ── audio stream handles ────────────────────────────────────────────── */
+    AudioStream  stream_in_;     // capture (mic)
+    AudioStream  stream_out_;    // playback (radio)
     unsigned int rate_in_  = 0;          // capture rate
     unsigned int rate_out_ = 0;          // playback rate
 

@@ -14,44 +14,6 @@ extern "C" {
 #include "cpu_support.h"
 }
 
-/* ── PortAudio helper: open a stream ─────────────────────────────────── */
-
-static PaStream* open_portaudio(const std::string& dev_str, bool is_input,
-                                 unsigned int rate, unsigned long frames_per_buf)
-{
-    PaDeviceIndex dev = static_cast<PaDeviceIndex>(std::stoi(dev_str));
-    const PaDeviceInfo* info = Pa_GetDeviceInfo(dev);
-    if (!info) return nullptr;
-
-    PaStreamParameters params{};
-    params.device                    = dev;
-    params.channelCount              = 1;
-    params.sampleFormat              = paInt16;
-    params.suggestedLatency          = is_input ? info->defaultLowInputLatency
-                                                : info->defaultHighOutputLatency;
-    params.hostApiSpecificStreamInfo = nullptr;
-
-    PaStream* stream = nullptr;
-    PaError err = Pa_OpenStream(
-        &stream,
-        is_input  ? &params : nullptr,
-        !is_input ? &params : nullptr,
-        static_cast<double>(rate),
-        frames_per_buf,
-        paClipOff,
-        nullptr, nullptr);
-
-    if (err != paNoError) return nullptr;
-
-    err = Pa_StartStream(stream);
-    if (err != paNoError) {
-        Pa_CloseStream(stream);
-        return nullptr;
-    }
-
-    return stream;
-}
-
 /* ── streaming linear-interpolation resampler (same as rade_decoder.cpp) */
 
 static int resample_linear_stream(const float* in, int n_in,
@@ -134,17 +96,15 @@ bool RadaeEncoder::open(const std::string& mic_hw_id,
 {
     close();
 
-    /* ── PortAudio capture (mic, 16 kHz) ───────────────────────────── */
+    /* ── audio capture (mic, 16 kHz) ────────────────────────────────── */
     rate_in_ = RADE_FS_SPEECH;
-    pa_in_ = open_portaudio(mic_hw_id, true, rate_in_, 160);
-    if (!pa_in_)
+    if (!stream_in_.open(mic_hw_id, true, 1, rate_in_, 160))
         return false;
 
-    /* ── PortAudio playback (radio, 8 kHz) ─────────────────────────── */
+    /* ── audio playback (radio, 8 kHz) ───────────────────────────────── */
     rate_out_ = RADE_FS;
-    pa_out_ = open_portaudio(radio_hw_id, false, rate_out_, 512);
-    if (!pa_out_) {
-        Pa_StopStream(pa_in_); Pa_CloseStream(pa_in_); pa_in_ = nullptr;
+    if (!stream_out_.open(radio_hw_id, false, 1, rate_out_, 512)) {
+        stream_in_.close();
         return false;
     }
 
@@ -152,8 +112,8 @@ bool RadaeEncoder::open(const std::string& mic_hw_id,
     rade_initialize();
     rade_ = rade_open(nullptr, RADE_VERBOSE_0);
     if (!rade_) {
-        Pa_StopStream(pa_in_);  Pa_CloseStream(pa_in_);  pa_in_  = nullptr;
-        Pa_StopStream(pa_out_); Pa_CloseStream(pa_out_); pa_out_ = nullptr;
+        stream_in_.close();
+        stream_out_.close();
         return false;
     }
 
@@ -161,8 +121,8 @@ bool RadaeEncoder::open(const std::string& mic_hw_id,
     lpcnet_ = lpcnet_encoder_create();
     if (!lpcnet_) {
         rade_close(rade_); rade_ = nullptr;
-        Pa_StopStream(pa_in_);  Pa_CloseStream(pa_in_);  pa_in_  = nullptr;
-        Pa_StopStream(pa_out_); Pa_CloseStream(pa_out_); pa_out_ = nullptr;
+        stream_in_.close();
+        stream_out_.close();
         return false;
     }
 
@@ -192,8 +152,8 @@ void RadaeEncoder::close()
     if (rade_)   { rade_close(rade_);              rade_   = nullptr; }
     if (lpcnet_) { lpcnet_encoder_destroy(lpcnet_); lpcnet_ = nullptr; }
 
-    if (pa_in_)  { Pa_StopStream(pa_in_);  Pa_CloseStream(pa_in_);  pa_in_  = nullptr; }
-    if (pa_out_) { Pa_StopStream(pa_out_); Pa_CloseStream(pa_out_); pa_out_ = nullptr; }
+    stream_in_.close();
+    stream_out_.close();
 
     input_level_  = 0.0f;
     output_level_ = 0.0f;
@@ -203,7 +163,7 @@ void RadaeEncoder::close()
 
 void RadaeEncoder::start()
 {
-    if (!pa_in_ || !pa_out_ || !rade_ || !lpcnet_ || running_) return;
+    if (!stream_in_.is_open() || !stream_out_.is_open() || !rade_ || !lpcnet_ || running_) return;
     running_ = true;
     thread_  = std::thread(&RadaeEncoder::processing_loop, this);
 }
@@ -219,9 +179,9 @@ void RadaeEncoder::stop()
     output_level_ = 0.0f;
 }
 
-/* ── helper: write IQ real part to PortAudio output ──────────────────── */
+/* ── helper: write IQ real part to audio output ──────────────────────── */
 
-static void write_real_to_output(PaStream* stream, const RADE_COMP* iq, int n_iq,
+static void write_real_to_output(AudioStream& stream, const RADE_COMP* iq, int n_iq,
                                   unsigned int rate_modem, unsigned int rate_out,
                                   double& resamp_frac, float& resamp_prev,
                                   std::atomic<float>& output_level,
@@ -258,9 +218,9 @@ static void write_real_to_output(PaStream* stream, const RADE_COMP* iq, int n_iq
         out_pcm[static_cast<size_t>(s)] = static_cast<int16_t>(v);
     }
 
-    /* write to PortAudio output */
-    Pa_WriteStream(stream, out_pcm.data(),
-                   static_cast<unsigned long>(n_resamp));
+    /* write to audio output */
+    stream.write(out_pcm.data(),
+                 static_cast<unsigned long>(n_resamp));
 }
 
 /* ── processing loop (dedicated thread) ──────────────────────────────── */
@@ -304,8 +264,8 @@ void RadaeEncoder::processing_loop()
         int prefill_out = prefill_frames
             * static_cast<int>(rate_out_) / static_cast<int>(RADE_FS);
         std::vector<int16_t> silence(static_cast<size_t>(prefill_out), 0);
-        Pa_WriteStream(pa_out_, silence.data(),
-                       static_cast<unsigned long>(prefill_out));
+        stream_out_.write(silence.data(),
+                          static_cast<unsigned long>(prefill_out));
     }
 
     while (running_.load(std::memory_order_relaxed)) {
@@ -314,8 +274,8 @@ void RadaeEncoder::processing_loop()
         while (static_cast<int>(acc_16k.size()) < LPCNET_FRAME_SIZE &&
                running_.load(std::memory_order_relaxed))
         {
-            PaError err = Pa_ReadStream(pa_in_, capture_buf.data(), READ_FRAMES);
-            if (err != paNoError && err != paInputOverflowed) {
+            AudioError err = stream_in_.read(capture_buf.data(), READ_FRAMES);
+            if (err == AUDIO_ERROR) {
                 if (!running_.load(std::memory_order_relaxed)) break;
                 continue;
             }
@@ -405,7 +365,7 @@ void RadaeEncoder::processing_loop()
                     }
                 }
 
-                write_real_to_output(pa_out_, tx_out.data(), n_out,
+                write_real_to_output(stream_out_, tx_out.data(), n_out,
                                      RADE_FS, rate_out_,
                                      resamp_out_frac_, resamp_out_prev_,
                                      output_level_, running_,
@@ -416,17 +376,17 @@ void RadaeEncoder::processing_loop()
     }
 
     /* ── send end-of-over frame ──────────────────────────────────────── */
-    if (rade_ && pa_out_) {
+    if (rade_ && stream_out_.is_open()) {
         int n_out = rade_tx_eoo(rade_, eoo_out.data());
         if (bpf_enabled_.load(std::memory_order_relaxed))
             rade_bpf_process(&bpf_, eoo_out.data(), eoo_out.data(), n_out);
-        write_real_to_output(pa_out_, eoo_out.data(), n_out,
+        write_real_to_output(stream_out_, eoo_out.data(), n_out,
                              RADE_FS, rate_out_,
                              resamp_out_frac_, resamp_out_prev_,
                              output_level_, running_,
                              tx_scale_.load(std::memory_order_relaxed));
         /* drain the output buffer */
-        Pa_StopStream(pa_out_);
-        Pa_StartStream(pa_out_);
+        stream_out_.stop();
+        stream_out_.start();
     }
 }
