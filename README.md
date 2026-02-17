@@ -1,4 +1,4 @@
-# RADAE_Gui
+# RADAE Gui
 
 Originally from: https://github.com/peterbmarks/radae_decoder
 
@@ -110,7 +110,8 @@ cmake -DCMAKE_BUILD_TYPE=Release -Wno-dev ..
 # and take a while to compile.
 make -j$(nproc)
 
-# Binary is now at: build/radae_decoder
+# Binary is now at: build/RADAE_Gui
+
 ```
 
 ### Environment quirks
