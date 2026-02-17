@@ -55,6 +55,8 @@ bool AudioStream::open(const std::string& device_id, bool is_input,
                        int channels, unsigned int sample_rate,
                        unsigned long frames_per_buffer)
 {
+    fprintf(stderr, "PortAudio open\n");
+
     close();
 
     PaDeviceIndex dev = static_cast<PaDeviceIndex>(std::stoi(device_id));

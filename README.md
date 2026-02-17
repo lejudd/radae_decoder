@@ -4,9 +4,9 @@ Originally from: https://github.com/peterbmarks/radae_decoder
 
 Based on code from: https://github.com/drowe67/radae
 
-A real-time RADAE (Radio Autoencoder) encoder and decoder for Linux. In receive (RX) mode it captures RADAE modem audio from a PulseAudio input device, decodes it using a neural OFDM demodulator and FARGAN vocoder, and plays the decoded speech on a PulseAudio output device. In transmit (TX) mode it captures speech from a microphone, extracts LPCNet features, encodes them with the RADE neural encoder, and outputs the OFDM modem signal to a radio. Includes a GTK3 UI with level meters, spectrum/waterfall displays, sync status, SNR, and a TX output level slider.
+A real-time RADAE (Radio Autoencoder) encoder and decoder for Linux. In receive (RX) mode it captures RADAE modem audio from an audio input device, decodes it using a neural OFDM demodulator and FARGAN vocoder, and plays the decoded speech on an audio output device. In transmit (TX) mode it captures speech from a microphone, extracts LPCNet features, encodes them with the RADE neural encoder, and outputs the OFDM modem signal to a radio. Includes a GTK3 UI with level meters, spectrum/waterfall displays, sync status, SNR, and a TX output level slider.
 
-![Platform](https://img.shields.io/badge/Platform-Linux-blue) ![GTK3](https://img.shields.io/badge/GUI-GTK3-green) ![PulseAudio](https://img.shields.io/badge/Audio-PulseAudio-orange) ![RADAE](https://img.shields.io/badge/Codec-RADAE-purple)
+![Platform](https://img.shields.io/badge/Platform-Linux-blue) ![GTK3](https://img.shields.io/badge/GUI-GTK3-green) ![ALSA](https://img.shields.io/badge/Audio-ALSA-orange) ![RADAE](https://img.shields.io/badge/Codec-RADAE-purple)
 
 
 ![Screenshot](images/screenshot.png)
@@ -25,14 +25,14 @@ not require python to run. It's (currently) a statically linked single binary of
 
 ### Receive (RX)
 - **Real-time RADAE decoding** — Full receive pipeline: Hilbert transform, OFDM demodulation, neural decoder, FARGAN speech synthesis
-- **Dual device selection** — Pick any PulseAudio capture device (modem input) and playback device (decoded speech output)
+- **Dual device selection** — Pick any capture device (modem input) and playback device (decoded speech output)
 - **Automatic signal acquisition** — Searches for RADAE signal, locks on when found, re-acquires after signal loss
 - **Live status display** — Shows sync state, SNR (dB), and frequency offset (Hz) while decoding
 - **Open WAV file recording** — Decodes and plays a WAV file recording such as those from the FreeDV app
 
 ### Transmit (TX)
 - **Real-time RADAE encoding** — Full transmit pipeline: microphone capture, LPCNet feature extraction, neural RADE encoder, OFDM modulation
-- **Dual device selection** — Pick any PulseAudio capture device (microphone) and playback device (radio transmit audio)
+- **Dual device selection** — Pick any capture device (microphone) and playback device (radio transmit audio)
 - **TX output level slider** — Adjustable output level (0–100%) to set the drive level to the radio; saved across sessions
 - **TX bandpass filter** — Switchable 700–2300 Hz bandpass filter on the TX output, applied just before the audio is sent to the radio. Uses a 101-tap FIR filter at 8 kHz to sharply limit the transmitted bandwidth. Toggled via the BPF switch in the main window; setting is saved across sessions
 - **End-of-over signalling** — Automatically sends an EOO frame when transmission stops
@@ -41,30 +41,30 @@ not require python to run. It's (currently) a statically linked single binary of
 - **Input & output level meters** — Calibrated dB scale (-60 to 0 dB) with peak hold
 - **Spectrum display** — Shows 4 kHz of audio spectrum. With a RADAE signal you should see energy concentrated in the OFDM band around 1.3 kHz
 - **Waterfall display** — Same as the spectrum but with vertical history
-- **Sample rate flexibility** — PulseAudio handles sample rate conversion; internally works at 8 kHz modem and 16 kHz speech rates
+- **Sample rate flexibility** — The audio backend handles sample rate conversion where supported; internally works at 8 kHz modem and 16 kHz speech rates
 - **Settings persistence** — Device selections and TX level are saved to `~/.config/radae-decoder.conf`
 
 ## How it works
 
 ### RX (Decode)
 ```
-PulseAudio Input (8 kHz mono)
+Audio Input (8 kHz mono)
   -> Hilbert transform (127-tap FIR) -> complex IQ
   -> RADE receiver (pilot acquisition, OFDM demod, neural decoder)
   -> FARGAN vocoder -> 16 kHz mono speech
-  -> PulseAudio Output
+  -> Audio Output
 ```
 
 ### TX (Encode)
 ```
-PulseAudio Mic Input (16 kHz mono)
+Mic Input (16 kHz mono)
   -> LPCNet feature extraction (36 features per 10 ms frame)
   -> Accumulate 12 feature frames (120 ms)
   -> RADE transmitter (neural encoder, OFDM modulation)
   -> 960 complex IQ samples @ 8 kHz
   -> [Optional] 700–2300 Hz bandpass filter (101-tap FIR, toggled by BPF switch)
   -> Take real part, scale by TX output level
-  -> PulseAudio Radio Output
+  -> Radio Audio Output
 ```
 
 The RADAE codec uses a 30-carrier OFDM waveform in ~1.3 kHz bandwidth. Each 120 ms modem frame produces 12 speech frames (10 ms each) via the neural decoder and FARGAN vocoder. Pilot symbols enable automatic frequency and timing synchronization.
@@ -74,7 +74,9 @@ The RADAE codec uses a 30-carrier OFDM waveform in ~1.3 kHz bandwidth. Each 120 
 ### Runtime
 - Linux (tested on Ubuntu 24.04 / Linux Mint)
 - GTK 3.24+
-- PulseAudio runtime libraries (`libpulse0`)
+- ALSA runtime libraries (`libasound2`) — default audio backend
+  - PulseAudio (`libpulse0`) if built with `-DAUDIO_BACKEND=PULSE`
+  - PortAudio if built with `-DAUDIO_BACKEND=PORTAUDIO`
 - X11 or Wayland display server
 
 ### Build-time
@@ -85,14 +87,19 @@ The RADAE codec uses a 30-carrier OFDM waveform in ~1.3 kHz bandwidth. Each 120 
 - Autotools (`autoconf`, `automake`, `libtool`) for building Opus
 - Development headers:
   - `libgtk-3-dev`
-  - `libpulse-dev`
+  - `libasound2-dev` (if using `-DAUDIO_BACKEND=ALSA`)
+  - `libpulse-dev` (if using `-DAUDIO_BACKEND=PULSE` default on Linux)
   - `libcairo2-dev` (usually pulled in by GTK3)
 
 ### Install dependencies (Debian/Ubuntu)
 ```bash
+# Default (ALSA backend)
 sudo apt-get install build-essential cmake \
-  libgtk-3-dev libpulse-dev pkg-config \
-  autoconf automake libtool libpulse-dev
+  libgtk-3-dev libasound2-dev pkg-config \
+  autoconf automake libtool
+
+# Optional: PulseAudio backend
+sudo apt-get install libpulse-dev
 ```
 
 ## Build Instructions
@@ -110,8 +117,35 @@ cmake -DCMAKE_BUILD_TYPE=Release -Wno-dev ..
 make -j$(nproc)
 
 # Binary is now at: build/RADAE_Gui
-
 ```
+
+### Audio backend selection
+
+The audio backend is selected at configure time via `-DAUDIO_BACKEND=`:
+
+| Value | Default on | Library needed |
+|-------|-----------|----------------|
+| `ALSA` | Linux | `libasound2-dev` |
+| `PULSE` | — | `libpulse-dev` |
+| `PORTAUDIO` | macOS | `portaudio19-dev` |
+
+```bash
+# Linux default (ALSA)
+cmake -DCMAKE_BUILD_TYPE=Release ..
+
+# Explicitly choose PulseAudio on Linux
+cmake -DCMAKE_BUILD_TYPE=Release -DAUDIO_BACKEND=PULSE ..
+
+# PortAudio (macOS default, also available on Linux)
+cmake -DCMAKE_BUILD_TYPE=Release -DAUDIO_BACKEND=PORTAUDIO ..
+```
+
+The selected backend is printed during configuration:
+```
+-- Audio backend: ALSA
+```
+
+Note: once a build directory has been configured, CMake caches `AUDIO_BACKEND`. Delete `CMakeCache.txt` or the build directory before switching backends.
 
 ### Environment quirks
 
@@ -130,8 +164,8 @@ cmake ..
 
 ### First run (RX)
 
-1. **Input dropdown** -- Select the PulseAudio capture device receiving the RADAE modem signal (e.g. a sound card connected to a radio receiver).
-2. **Output dropdown** -- Select the PulseAudio playback device for decoded speech (e.g. speakers or headphones).
+1. **Input dropdown** -- Select the capture device receiving the RADAE modem signal (e.g. a sound card connected to a radio receiver).
+2. **Output dropdown** -- Select the playback device for decoded speech (e.g. speakers or headphones).
 3. **Start button** -- Click to begin decoding. The button turns red and changes to "Stop".
 4. **Status bar** -- Shows "Searching for signal..." until a RADAE signal is detected, then displays "Synced -- SNR: X dB  Freq: +Y Hz".
 5. **Meter display** -- Shows decoded output audio levels in real-time once synced.
@@ -144,7 +178,7 @@ decoding will automatically start.
 
 1. Toggle the **TX switch** to enable transmit mode. The settings dialog gains TX-specific device selectors.
 2. **TX Input** -- Select the microphone capture device.
-3. **TX Output** -- Select the PulseAudio playback device connected to the radio transmitter.
+3. **TX Output** -- Select the playback device connected to the radio transmitter.
 4. **TX level slider** -- Adjust the output drive level (right side of window). The setting is saved across sessions.
 5. **BPF switch** -- Toggle the 700–2300 Hz bandpass filter on the TX output. This limits the transmitted bandwidth to the SSB passband. The setting is saved across sessions.
 6. Click **Start** to begin transmitting. The status bar shows "Transmitting..." and the meters show mic input and modem output levels.
@@ -152,7 +186,9 @@ decoding will automatically start.
 
 ### Permissions
 
-If you see "Failed to open audio devices", ensure PulseAudio is running and your user has access to the PulseAudio daemon. On most desktop Linux systems this works out of the box.
+If you see "Failed to open audio devices":
+- **ALSA**: Ensure your user is in the `audio` group (`sudo usermod -aG audio $USER`, then log out and back in).
+- **PulseAudio**: Ensure PulseAudio is running (`pulseaudio --check` or `pactl info`).
 
 ## Architecture
 
@@ -160,13 +196,17 @@ If you see "Failed to open audio devices", ensure PulseAudio is running and your
 
 ```
 radae_decoder/
-├── CMakeLists.txt              # Top-level build (GTK, PulseAudio, radae_nopy)
+├── CMakeLists.txt              # Top-level build (GTK, audio backend, radae)
 ├── README.md
 ├── src/
 │   ├── main.cpp                # GTK application, UI, event handlers
 │   ├── rade_decoder.h/cpp      # RADAE decode pipeline (capture -> decode -> playback)
 │   ├── rade_encoder.h/cpp      # RADAE encode pipeline (mic -> encode -> radio)
-│   ├── audio_input.h/cpp       # PulseAudio device enumeration
+│   ├── audio_input.h/cpp       # Audio device enumeration helper
+│   ├── audio_stream.h          # AudioStream abstract interface
+│   ├── audio_stream_alsa.cpp   # ALSA backend (Linux default)
+│   ├── audio_stream_pulse.cpp  # PulseAudio backend
+│   ├── audio_stream_portaudio.cpp  # PortAudio backend (macOS default)
 │   ├── meter_widget.h/cpp      # Cairo-based bar meter widget
 │   ├── spectrum_widget.h/cpp   # Cairo-based spectrum display
 │   └── waterfall_widget.h/cpp  # Cairo-based waterfall display
@@ -186,9 +226,10 @@ radae_decoder/
 
 | Module | Responsibility |
 |--------|---------------|
-| **rade_decoder** | Complete real-time decode pipeline: PulseAudio capture (8 kHz), Hilbert transform (real to IQ), RADE receiver, FARGAN vocoder synthesis, PulseAudio playback (16 kHz). Runs on a dedicated thread with atomic status variables. |
-| **rade_encoder** | Complete real-time encode pipeline: PulseAudio mic capture (16 kHz), LPCNet feature extraction, RADE transmitter (neural encoder + OFDM mod), PulseAudio playback to radio (8 kHz). Runs on a dedicated thread; TX output level controlled via atomic. |
-| **audio_input** | PulseAudio device enumeration (sources and sinks) via the PulseAudio introspection API |
+| **rade_decoder** | Complete real-time decode pipeline: audio capture (8 kHz), Hilbert transform (real to IQ), RADE receiver, FARGAN vocoder synthesis, audio playback (16 kHz). Runs on a dedicated thread with atomic status variables. |
+| **rade_encoder** | Complete real-time encode pipeline: mic capture (16 kHz), LPCNet feature extraction, RADE transmitter (neural encoder + OFDM mod), audio playback to radio (8 kHz). Runs on a dedicated thread; TX output level controlled via atomic. |
+| **audio_stream** | Backend-neutral `AudioStream` class. Compiled against one of: `audio_stream_alsa.cpp`, `audio_stream_pulse.cpp`, or `audio_stream_portaudio.cpp` depending on `AUDIO_BACKEND`. |
+| **audio_input** | Device enumeration wrapper used by the UI dropdowns |
 | **meter_widget** | Custom `GtkDrawingArea` widget; redraws at ~30 fps using Cairo; converts linear RMS to logarithmic dB; green-to-red gradient fill; peak-hold with decay |
 | **main** | GTK application shell; connects signals; manages device combo boxes and TX level slider; starts/stops decoder/encoder; updates meters and status via GLib timer |
 | **radae_nopy (librade)** | RADAE codec C library: OFDM mod/demod, pilot acquisition, neural encoder/decoder (GRU+Conv), bandpass filter. Neural network weights compiled directly into the binary (~47 MB). |
@@ -196,8 +237,8 @@ radae_decoder/
 ### Decode pipeline (RX)
 
 ```
-PulseAudio Input (8 kHz mono)
-  | pa_simple_read() -- blocking read, S16_LE mono
+Audio Input (8 kHz mono)
+  | AudioStream::read() -- blocking read, S16_LE mono
   v
 Hilbert transform (127-tap Hamming-windowed FIR)
   -> RADE_COMP (complex IQ samples)
@@ -208,14 +249,14 @@ rade_rx() -- pilot acquisition, OFDM demod, neural decoder
 FARGAN vocoder (fargan_synthesize)
   -> 160 float samples per frame @ 16 kHz (10 ms)
   v
-pa_simple_write() -- PulseAudio playback, S16_LE mono
+AudioStream::write() -- audio playback, S16_LE mono
 ```
 
 ### Encode pipeline (TX)
 
 ```
-PulseAudio Mic Input (16 kHz mono)
-  | pa_simple_read() -- blocking read, S16_LE mono
+Mic Input (16 kHz mono)
+  | AudioStream::read() -- blocking read, S16_LE mono
   v
 lpcnet_compute_single_frame_features()
   -> 36-float feature vector per 160 samples (10 ms)
@@ -229,7 +270,7 @@ rade_tx() -- neural encoder, OFDM modulation
   v
 Take real part, scale by TX level slider
   v
-pa_simple_write() -- PulseAudio playback to radio, S16_LE mono
+AudioStream::write() -- audio playback to radio, S16_LE mono
 ```
 
 ### Sync state machine
@@ -257,7 +298,13 @@ Your pkg-config search path is missing the multiarch directory:
 export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig
 ```
 
-### "Failed to open audio devices"
+### "Failed to open audio devices" (ALSA)
+- List available capture devices: `arecord -L`
+- List available playback devices: `aplay -L`
+- Ensure your user is in the `audio` group: `groups $USER`
+- Try the `default` device, or a specific `hw:X,Y` or `plughw:X,Y` identifier from `arecord -l`.
+
+### "Failed to open audio devices" (PulseAudio)
 - Ensure PulseAudio is running: `pulseaudio --check` or `pactl info`.
 - Verify devices exist: `pactl list sources short` (capture) and `pactl list sinks short` (playback).
 - Try different devices from the dropdowns.
@@ -284,12 +331,15 @@ The neural network weight files (`rade_enc_data.c`, `rade_dec_data.c`) are ~24 M
 - **Feature frames per modem frame**: 12 (3 latent vectors x 4 encoder stride)
 - **Speech frame**: 160 samples @ 16 kHz (10 ms)
 
-### PulseAudio configuration
-- **API**: `pa_simple` (simple synchronous API)
-- **Format**: `PA_SAMPLE_S16LE`
-- **Capture rate**: 8 kHz (modem) / 16 kHz (mic); PulseAudio handles device rate conversion
-- **Playback rate**: 16 kHz (speech) / 8 kHz (modem); PulseAudio handles device rate conversion
-- **Channels**: 1 (mono)
+### Audio backend configuration
+
+| Backend | API | Format | Notes |
+|---------|-----|--------|-------|
+| ALSA | `snd_pcm_readi` / `snd_pcm_writei` | `SND_PCM_FORMAT_S16_LE` | Linux default; direct hardware access, low latency |
+| PulseAudio | `pa_simple_read` / `pa_simple_write` | `PA_SAMPLE_S16LE` | Server-managed; handles rate conversion automatically |
+| PortAudio | `Pa_ReadStream` / `Pa_WriteStream` | `paInt16` | macOS default; cross-platform |
+
+All three backends present the same `AudioStream` interface to the rest of the application.
 
 ## Demo tools
 
@@ -316,7 +366,7 @@ sox ../voice.wav -r 16000 -t .s16 -c 1 - | \
   ./src/radae_tx > tx.iq
 ```
 
-### Decode: IQ → WAV  
+### Decode: IQ → WAV
 ```
 cat tx.iq | \
   ./src/radae_rx | \
@@ -368,7 +418,7 @@ Test:
 - RADAE codec by David Rowe ([github.com/drowe67](https://github.com/drowe67))
 - Opus/LPCNet/FARGAN by Xiph.Org / Amazon ([opus-codec.org](https://opus-codec.org/))
 - Built with GTK 3 ([gtk.org](https://www.gtk.org/))
-- Audio I/O via PulseAudio ([freedesktop.org/wiki/Software/PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/))
+- Audio I/O via ALSA / PulseAudio / PortAudio (selectable at build time)
 - Thanks David Rowe for help and encouragement.
 
 ---
