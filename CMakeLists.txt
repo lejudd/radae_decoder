@@ -95,8 +95,10 @@ set_target_properties(rade PROPERTIES
 # add_executable(rade_demod src/tools/rade_demod.c)
 # target_link_libraries(rade_demod rade opus m)
 
-# add_executable(rade_modulate src/tools/rade_modulate.c)
-# target_link_libraries(rade_modulate rade opus m)
+# Reads a WAV file containing speech audio and writes a WAV
+# file containing RADE OFDM encoded audio.
+add_executable(rade_modulate src/tools/rade_modulate.c)
+target_link_libraries(rade_modulate rade opus m)
 
 add_executable(webrx_rade_decode src/tools/webrx_rade_decode.c)
 target_link_libraries(webrx_rade_decode rade opus m)
