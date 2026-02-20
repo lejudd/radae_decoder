@@ -499,3 +499,41 @@ Test:
 ---
 
 **Platform**: Linux (Ubuntu 24.04 / Linux Mint)
+
+## Performance notes
+
+MacMini M4
+
+No compiler optimisation:
+
+```
+marksp@Peters-M4-Mini build % time ./rade_demod ~/Desktop/FDV_VK3SRC_EOO.wav out.wav
+Input: /Users/marksp/Desktop/FDV_VK3SRC_EOO.wav  48000 Hz  1 ch  16-bit int
+Modem input: 433920 samples @ 8000 Hz  (54.2 s)
+rade_open: model_file=model19_check3/checkpoints/checkpoint_epoch_100.pth (ignored, using built-in weights)
+rade_open: n_features_in=432 Nmf=960 Neoo=1152 n_eoo_bits=180
+Callsign = 'VK3SRC'
+End-of-over at modem frame 447
+Modem frames: 452   valid: 443
+Output: out.wav  53.1 s  (1699520 bytes)
+./rade_demod ~/Desktop/FDV_VK3SRC_EOO.wav out.wav  11.39s user 0.05s system 99% cpu 11.457 total
+```
+
+Built with:
+```
+cmake -DCMAKE_BUILD_TYPE=Release ..
+```
+Makes almost no difference:
+```
+marksp@Peters-M4-Mini build % time ./rade_demod ~/Desktop/FDV_VK3SRC_EOO.wav out.wav
+Input: /Users/marksp/Desktop/FDV_VK3SRC_EOO.wav  48000 Hz  1 ch  16-bit int
+Modem input: 433920 samples @ 8000 Hz  (54.2 s)
+rade_open: model_file=model19_check3/checkpoints/checkpoint_epoch_100.pth (ignored, using built-in weights)
+rade_open: n_features_in=432 Nmf=960 Neoo=1152 n_eoo_bits=180
+Callsign = 'VK3SRC'
+End-of-over at modem frame 447
+Modem frames: 452   valid: 443
+Output: out.wav  53.1 s  (1699520 bytes)
+./rade_demod ~/Desktop/FDV_VK3SRC_EOO.wav out.wav  11.26s user 0.02s system 99% cpu 11.290 total
+```
+The bottleneck might be file i/o.
