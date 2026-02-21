@@ -325,6 +325,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Starting encoder...\n");
         encoder.start();
 
+        encoder.set_callsign(config.call);
+        encoder.set_bpf_enabled(true);
+
         fprintf(stderr, "Running... Press Ctrl+C to stop\n");
         while (g_running && encoder.is_running()) {
             sleep(1);
