@@ -34,6 +34,7 @@ static GtkWidget*               g_waterfall          = nullptr;   // waterfall w
 static GtkWidget*               g_status             = nullptr;   // status label
 static GtkWidget*               g_settings_dlg       = nullptr;   // settings dialog
 static GtkWidget*               g_callsign_entry     = nullptr;   // station callsign
+static GtkWidget*               g_gridsquare_entry   = nullptr;   // station gridsquare
 static GtkWidget*               g_mic_slider         = nullptr;   // TX mic input level slider
 static GtkWidget*               g_tx_slider          = nullptr;   // TX output level slider
 static guint                    g_timer              = 0;         // meter update timer
@@ -81,6 +82,8 @@ static void save_config()
         f << "bpf_enabled=" << (g_bpf_switch && gtk_switch_get_active(GTK_SWITCH(g_bpf_switch)) ? 1 : 0) << '\n';
         const char* cs = g_callsign_entry ? gtk_entry_get_text(GTK_ENTRY(g_callsign_entry)) : "";
         f << "callsign=" << cs << '\n';
+        const char* gs = g_gridsquare_entry ? gtk_entry_get_text(GTK_ENTRY(g_gridsquare_entry)) : "";
+        f << "gridsquare=" << gs << '\n';
     }
 }
 
@@ -90,7 +93,7 @@ static bool restore_config()
     std::ifstream f(config_path());
     if (!f) return false;
 
-    std::string saved_in, saved_out, saved_tx_in, saved_tx_out, saved_callsign;
+    std::string saved_in, saved_out, saved_tx_in, saved_tx_out, saved_callsign, saved_gridsquare;
     int saved_tx_level = -1;
     int saved_mic_level = -1;
     int saved_bpf_enabled = -1;
@@ -112,6 +115,8 @@ static bool restore_config()
             saved_bpf_enabled = std::stoi(line.substr(12));
         else if (line.compare(0, 9, "callsign=") == 0)
             saved_callsign = line.substr(9);
+        else if (line.compare(0, 11, "gridsquare=") == 0)
+            saved_gridsquare = line.substr(11);
     }
 
     if (saved_in.empty() && saved_out.empty()) return false;
@@ -159,6 +164,8 @@ static bool restore_config()
         gtk_switch_set_active(GTK_SWITCH(g_bpf_switch), saved_bpf_enabled != 0);
     if (!saved_callsign.empty() && g_callsign_entry)
         gtk_entry_set_text(GTK_ENTRY(g_callsign_entry), saved_callsign.c_str());
+    if (!saved_gridsquare.empty() && g_gridsquare_entry)
+        gtk_entry_set_text(GTK_ENTRY(g_gridsquare_entry), saved_gridsquare.c_str());
 
     return (in_idx >= 0 && out_idx >= 0);
 }
@@ -384,6 +391,12 @@ static void on_tx_combo_changed(GtkComboBox* /*combo*/, gpointer /*data*/)
 
 /* callsign entry changed: save config */
 static void on_callsign_changed(GtkEditable* /*e*/, gpointer /*data*/)
+{
+    save_config();
+}
+
+/* gridsquare entry changed: save config */
+static void on_gridsquare_changed(GtkEditable* /*e*/, gpointer /*data*/)
 {
     save_config();
 }
@@ -811,6 +824,28 @@ static void activate(GtkApplication* app, gpointer /*data*/)
     gtk_box_pack_start(GTK_BOX(callsign_hbox), cs_spacer, FALSE, FALSE, 0);
 
     gtk_box_pack_start(GTK_BOX(scontent), callsign_hbox, FALSE, FALSE, 0);
+
+    /* ── gridsquare entry row ─────────────────────────────────────── */
+    GtkWidget* gridsquare_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+
+    GtkWidget* gridsquare_label = gtk_label_new("Grid Square:");
+    gtk_widget_set_size_request(gridsquare_label, 50, -1);
+    gtk_label_set_xalign(GTK_LABEL(gridsquare_label), 0.0);
+    gtk_box_pack_start(GTK_BOX(gridsquare_hbox), gridsquare_label, FALSE, FALSE, 0);
+
+    g_gridsquare_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(g_gridsquare_entry), "e.g. QF56");
+    gtk_entry_set_max_length(GTK_ENTRY(g_gridsquare_entry), 8);
+    gtk_widget_set_tooltip_text(g_gridsquare_entry, "Your Maidenhead grid square locator");
+    g_signal_connect(g_gridsquare_entry, "changed", G_CALLBACK(on_gridsquare_changed), NULL);
+    gtk_box_pack_start(GTK_BOX(gridsquare_hbox), g_gridsquare_entry, TRUE, TRUE, 0);
+
+    /* spacer to align with refresh button above */
+    GtkWidget* gs_spacer = gtk_label_new("");
+    gtk_widget_set_size_request(gs_spacer, 28, -1);
+    gtk_box_pack_start(GTK_BOX(gridsquare_hbox), gs_spacer, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(scontent), gridsquare_hbox, FALSE, FALSE, 0);
 
     /* ── layout ────────────────────────────────────────────────────── */
     GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
