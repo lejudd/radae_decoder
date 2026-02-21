@@ -98,7 +98,7 @@ target_link_libraries(rade_demod rade opus m)
 
 # Reads a WAV file containing speech audio and writes a WAV
 # file containing RADE OFDM encoded audio.
-add_executable(rade_modulate src/tools/rade_modulate.c)
+add_executable(rade_modulate src/tools/rade_modulate.cpp)
 target_link_libraries(rade_modulate rade opus m)
 
 add_executable(webrx_rade_decode src/tools/webrx_rade_decode.c)

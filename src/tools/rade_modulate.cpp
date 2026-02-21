@@ -1,6 +1,6 @@
 /*---------------------------------------------------------------------------*\
 
-  rade_modulate.c
+  rade_modulate.cpp
 
   RADAE WAV modulator.  Reads a WAV file containing speech audio and writes
   a WAV file containing RADE OFDM encoded audio — the transmit counterpart
@@ -49,11 +49,17 @@
 #include <math.h>
 #include <getopt.h>
 
+#include <string>
+#include <vector>
+
 #include "rade_api.h"
 #include "rade_dsp.h"
+extern "C" {
 #include "lpcnet.h"
 #include "arch.h"
 #include "cpu_support.h"
+}
+#include "EooCallsignDecoder.hpp"
 
 /* ---- WAV file I/O ---- */
 
@@ -126,7 +132,7 @@ static float *wav_read_mono_float(FILE *f, const wav_info *info, long *n_out) {
     long  total = (long)info->data_size / (bps / 8);
     long  mono  = total / nch;
 
-    float *buf = malloc((size_t)mono * sizeof(float));
+    float *buf = (float *)malloc((size_t)mono * sizeof(float));
     if (!buf) return NULL;
 
     for (long i = 0; i < mono; i++) {
@@ -187,15 +193,15 @@ static void wav_write_header(FILE *f, int sample_rate, uint32_t data_bytes) {
 static float *resample_linear(const float *in, long n_in,
                               int in_rate, int out_rate, long *n_out) {
     if (in_rate == out_rate) {
-        float *out = malloc((size_t)n_in * sizeof(float));
+        float *out = (float *)malloc((size_t)n_in * sizeof(float));
         if (out) memcpy(out, in, (size_t)n_in * sizeof(float));
         *n_out = n_in;
         return out;
     }
-    if (n_in < 2) { *n_out = 0; return malloc(1); }
+    if (n_in < 2) { *n_out = 0; return (float *)malloc(1); }
 
     *n_out = (long)((double)n_in * out_rate / in_rate);
-    float *out = malloc((size_t)*n_out * sizeof(float));
+    float *out = (float *)malloc((size_t)*n_out * sizeof(float));
     if (!out) return NULL;
 
     double step = (double)in_rate / (double)out_rate;   /* input samples per output sample */
@@ -234,8 +240,9 @@ static void usage(void) {
             "              (resampled to %d Hz / mixed to mono internally)\n"
             "  Output WAV: mono 16-bit PCM @ %d Hz (RADE modulated signal)\n\n"
             "options:\n"
-            "  -h, --help     Show this help\n"
-            "  -v LEVEL       Verbosity: 0=quiet  1=normal (default)  2=verbose\n",
+            "  -h, --help               Show this help\n"
+            "  -v LEVEL                 Verbosity: 0=quiet  1=normal (default)  2=verbose\n"
+            "  --callsign <CALLSIGN>    Station callsign to encode in the EOO frame\n",
             RADE_FS_SPEECH, RADE_FS);
 }
 
@@ -243,16 +250,19 @@ static void usage(void) {
 
 int main(int argc, char *argv[]) {
     int verbose = 1;
+    std::string callsign;
     int opt;
     static struct option long_options[] = {
-        {"help", no_argument, NULL, 'h'},
-        {NULL,   0,           NULL, 0 }
+        {"help",     no_argument,       NULL, 'h'},
+        {"callsign", required_argument, NULL, 'c'},
+        {NULL,       0,                 NULL,  0 }
     };
 
     while ((opt = getopt_long(argc, argv, "hv:", long_options, NULL)) != -1) {
         switch (opt) {
             case 'h': usage(); return 0;
             case 'v': verbose = atoi(optarg); break;
+            case 'c': callsign = optarg; break;
             default:  usage(); return 1;
         }
     }
@@ -317,7 +327,7 @@ int main(int argc, char *argv[]) {
 
     int flags = (verbose < 2) ? RADE_VERBOSE_0 : 0;
     /* model_name is ignored in the nopy build (built-in weights) */
-    char *model_name = "model19_check3/checkpoints/checkpoint_epoch_100.pth";
+    char *model_name = (char *)"model19_check3/checkpoints/checkpoint_epoch_100.pth";
     struct rade *r = rade_open(model_name, flags);
     if (!r) {
         fprintf(stderr, "rade_modulate: rade_open failed\n");
@@ -330,15 +340,26 @@ int main(int argc, char *argv[]) {
     int n_features_in  = rade_n_features_in_out(r);
     int n_tx_out       = rade_n_tx_out(r);
     int n_eoo_out      = rade_n_tx_eoo_out(r);
+    int n_eoo_bits     = rade_n_eoo_bits(r);
     int frames_per_mf  = n_features_in / RADE_NB_TOTAL_FEATURES;  /* 12 feature frames per modem frame */
 
-    float     *features_in = malloc((size_t)n_features_in  * sizeof(float));
-    RADE_COMP *tx_out      = malloc((size_t)n_tx_out       * sizeof(RADE_COMP));
-    RADE_COMP *eoo_out     = malloc((size_t)n_eoo_out      * sizeof(RADE_COMP));
+    /* ------------------------------------------------- encode callsign into EOO bits */
+    if (!callsign.empty()) {
+        std::vector<float> eoo_bits((size_t)n_eoo_bits);
+        EooCallsignDecoder enc;
+        enc.encode(callsign, eoo_bits.data(), n_eoo_bits);
+        rade_tx_set_eoo_bits(r, eoo_bits.data());
+        if (verbose >= 1)
+            fprintf(stderr, "Callsign: %s\n", callsign.c_str());
+    }
+
+    float     *features_in = (float *)    malloc((size_t)n_features_in  * sizeof(float));
+    RADE_COMP *tx_out      = (RADE_COMP *)malloc((size_t)n_tx_out       * sizeof(RADE_COMP));
+    RADE_COMP *eoo_out     = (RADE_COMP *)malloc((size_t)n_eoo_out      * sizeof(RADE_COMP));
 
     /* int16 output scratch — sized to the larger of tx / eoo frames */
     int      out_buf_n = (n_eoo_out > n_tx_out) ? n_eoo_out : n_tx_out;
-    int16_t *out_buf   = malloc((size_t)out_buf_n * sizeof(int16_t));
+    int16_t *out_buf   = (int16_t *) malloc((size_t)out_buf_n * sizeof(int16_t));
 
     if (!features_in || !tx_out || !eoo_out || !out_buf) {
         fprintf(stderr, "rade_modulate: malloc failed\n");
@@ -406,6 +427,7 @@ int main(int argc, char *argv[]) {
     /* ---------------------------------------------------- end-of-over frame */
     {
         int n_out = rade_tx_eoo(r, eoo_out);
+        fprintf(stderr, "Writing EOO Frame\n");
         total_bytes += write_iq_real(fout, out_buf, eoo_out, n_out);
     }
 
