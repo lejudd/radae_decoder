@@ -8,18 +8,27 @@ A real-time RADAE (Radio Autoencoder) encoder and decoder for Linux. In receive 
 
 ![Platform](https://img.shields.io/badge/Platform-Linux-blue) ![GTK3](https://img.shields.io/badge/GUI-GTK3-green) ![ALSA](https://img.shields.io/badge/Audio-ALSA-orange) ![RADAE](https://img.shields.io/badge/Codec-RADAE-purple)
 
+## Not an official release
+
+Note that this version of the FreeDV RADEV1 software started as an experiment to find out if Claude Code could help
+with the work of porting the current Python implementation over to C. 
+
+It's not a supported product of the project and hasn't been fully tested or code reviewed.
+
+If it works for you, great, if not I advise using the supported FreeDV app you can [download here](https://freedv.org/download/).
+
+## Screenshots
 
 ![Screenshot](images/screenshot.png)
 
 ![Settings](images/settings.png)
 
-![Transmit](images/bpf%20off.png)
+![Rig](images/rig_control.png)
 
 [Video demo](https://youtu.be/Q1SExfmMqZ0?si=LSMlgETFaZ1H1Fn5)
 
 Unlike the official FreeDV app, this program uses an experimental C port of the python code and does
-not require python to run. It's (currently) a statically linked single binary of just 11MB compared to
-600MB. (But, of course, it does far far less).
+not require python to run. It's (currently) a statically linked single binary of just 16MB compared to 600MB. (But, of course, it does far far less).
 
 ## Features
 
@@ -77,6 +86,7 @@ The RADAE codec uses a 30-carrier OFDM waveform in ~1.3 kHz bandwidth. Each 120 
 - ALSA runtime libraries (`libasound2`) — default audio backend
   - PulseAudio (`libpulse0`) if built with `-DAUDIO_BACKEND=PULSE`
   - PortAudio if built with `-DAUDIO_BACKEND=PORTAUDIO`
+- hamlib
 - X11 or Wayland display server
 
 ### Build-time
@@ -89,6 +99,7 @@ The RADAE codec uses a 30-carrier OFDM waveform in ~1.3 kHz bandwidth. Each 120 
   - `libgtk-3-dev`
   - `libasound2-dev` (if using `-DAUDIO_BACKEND=ALSA`)
   - `libpulse-dev` (if using `-DAUDIO_BACKEND=PULSE` default on Linux)
+  - `libhamlib-dev` (GUI only)
   - `libcairo2-dev` (usually pulled in by GTK3)
 
 ### Install dependencies (Debian/Ubuntu)
@@ -96,10 +107,23 @@ The RADAE codec uses a 30-carrier OFDM waveform in ~1.3 kHz bandwidth. Each 120 
 # Default (ALSA backend)
 sudo apt-get install build-essential cmake \
   libgtk-3-dev libasound2-dev pkg-config \
-  autoconf automake libtool
+  autoconf automake libtool libpulse-dev libhamlib-dev
+
+# Tools-only (no GUI build, no GTK/Hamlib needed)
+sudo apt-get install build-essential cmake \
+  libasound2-dev pkg-config \
+  autoconf automake libtool libpulse-dev
 
 # Optional: PulseAudio backend
 sudo apt-get install libpulse-dev
+```
+
+### Install dependencies for macOS
+You will need Xcode command line tools and homebrew.
+
+```
+brew install automake libtool git sox cmake wget pkgconf \
+gtk+3 hamlib portaudio 
 ```
 
 ## Build Instructions
@@ -111,12 +135,16 @@ mkdir -p build
 cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 
+# Tools-only build (skip RADAE_Gui and GUI deps)
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=OFF ..
+
 # First build downloads Opus (~175 MB) and compiles everything.
 # The NN weight files (rade_enc_data.c, rade_dec_data.c) are ~47 MB
 # and take a while to compile.
 make -j$(nproc)
 
 # Binary is now at: build/RADAE_Gui
+# Tools are at: build/tools/
 ```
 
 ### Audio backend selection
@@ -161,6 +189,53 @@ On some systems, pkg-config can't find `.pc` files in `/usr/lib/x86_64-linux-gnu
 export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig
 cmake ..
 ```
+
+## Debian Package for webrx_rade_decode
+
+`webrx_rade_decode` can be packaged as a self-contained Debian `.deb` for easy installation on Debian/Ubuntu systems. All dependencies (Opus, RADE library, neural network weights) are statically linked into the binary, so the only runtime requirement is `libc6`.
+
+### Quick build
+
+```bash
+# Install build dependencies
+sudo apt-get install build-essential cmake autoconf automake libtool pkg-config \
+    libgtk-3-dev libhamlib-dev libpulse-dev
+
+# Build and package  (downloads Opus from GitHub on first run; cached afterwards)
+./package-deb.sh
+
+# Install
+sudo dpkg -i webrx-rade-decode_0.1.0-1_amd64.deb
+```
+
+### Skip rebuild
+
+If `build/tools/webrx_rade_decode` already exists from a previous cmake build:
+
+```bash
+./package-deb.sh --skip-build
+```
+
+### Using dpkg-buildpackage
+
+```bash
+sudo apt install debhelper-compat
+```
+
+A `debian/` directory is provided for use with standard Debian tooling:
+
+```bash
+# (run this from the top level directory)
+# Full package (default behavior): CLI and GUI
+dpkg-buildpackage -us -uc -b
+
+# Minimal package (CLI tools only): webrx-rade-decode-minimal
+dpkg-buildpackage -us -uc -b -Ppkg.minimal
+```
+
+> **Note:** the build fetches Opus source from GitHub the first time it runs. This requires
+> internet access during the configure step, which is non-standard for Debian policy. Use
+> `package-deb.sh` for straightforward local builds.
 
 ## Usage
 
@@ -266,36 +341,6 @@ SYNC SNR: 12.3 dB  Freq: +1.5 Hz  In: 0.45  Out: 0.62
 `SYNC` becomes `----` when the receiver has not yet locked on to a signal. Press **Ctrl+C** to stop cleanly (an EOO frame is sent automatically in TX mode).
 
 ## Architecture
-
-### Code structure
-
-```
-radae_decoder/
-├── CMakeLists.txt              # Top-level build (GTK, audio backend, radae)
-├── README.md
-├── src/
-│   ├── main.cpp                # GTK application, UI, event handlers
-│   ├── rade_decoder.h/cpp      # RADAE decode pipeline (capture -> decode -> playback)
-│   ├── rade_encoder.h/cpp      # RADAE encode pipeline (mic -> encode -> radio)
-│   ├── audio_input.h/cpp       # Audio device enumeration helper
-│   ├── audio_stream.h          # AudioStream abstract interface
-│   ├── audio_stream_alsa.cpp   # ALSA backend (Linux default)
-│   ├── audio_stream_pulse.cpp  # PulseAudio backend
-│   ├── audio_stream_portaudio.cpp  # PortAudio backend (macOS default)
-│   ├── meter_widget.h/cpp      # Cairo-based bar meter widget
-│   ├── spectrum_widget.h/cpp   # Cairo-based spectrum display
-│   └── waterfall_widget.h/cpp  # Cairo-based waterfall display
-└── radae_nopy/                 # RADAE codec library (C, builds librade + opus)
-    ├── CMakeLists.txt
-    ├── cmake/BuildOpus.cmake   # Downloads & builds Opus with FARGAN/LPCNet
-    └── src/
-        ├── rade_api.h          # Public C API
-        ├── rade_rx.c           # Receiver (sync state machine, OFDM demod)
-        ├── rade_enc/dec*.c     # Neural encoder/decoder + compiled weights
-        ├── rade_ofdm.c         # OFDM modulation/demodulation
-        ├── rade_acq.c          # Pilot acquisition & tracking
-        └── ...
-```
 
 ### Component overview
 
@@ -437,15 +482,15 @@ rade_modulate [-v 0|1|2] <intput.wav> <output.wav>
 ### Encode: WAV → IQ
 ```
 sox ../voice.wav -r 16000 -t .s16 -c 1 - | \
-  ./src/lpcnet_demo -features /dev/stdin - | \
-  ./src/radae_tx > tx.iq
+  ./tools/lpcnet_demo -features /dev/stdin - | \
+  ./tools/radae_tx > tx.iq
 ```
 
 ### Decode: IQ → WAV
 ```
 cat tx.iq | \
-  ./src/radae_rx | \
-  ./src/lpcnet_demo -fargan-synthesis /dev/stdin - | \
+  ./tools/radae_rx | \
+  ./tools/lpcnet_demo -fargan-synthesis /dev/stdin - | \
   sox -t .s16 -r 16000 -c 1 - decoded.wav
 ```
 
@@ -460,9 +505,9 @@ usage: radae_rx [options]
 
 ```
 sox ../FDV_offair.wav -r 8000 -e float -b 32 -c 1 -t raw - | \
-./src/real2iq | \
-./src/radae_rx > features.f32
-./src/lpcnet_demo -fargan-synthesis features.f32 - | \
+./tools/real2iq | \
+./tools/radae_rx > features.f32
+./tools/lpcnet_demo -fargan-synthesis features.f32 - | \
 sox -t .s16 -r 16000 -c 1 - decoded.wav
 play decoded.wav
 ```
@@ -483,9 +528,102 @@ options:
 ```
 
 Test:
-```sox FDV_FromRadio_20260125-080557_local.wav \
+```
+sox FDV_offair.wav \
 -t raw -b 16 -r 8000 -e signed-integer - | \
 ./webrx_rade_decode |sox -t raw -r 8000 -b 16 -e signed-integer -c 1 - output.wav
+```
+
+Prints information to stderr for OpenWebRx+ to display to the user like this:
+```
+Status=Searching
+Status=Sync,SNR=20dB,FreqOffset=1.0 Hz
+Status=End-of-over at modem frame 38
+Status=Searching
+Status=Sync,SNR=22dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=34dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=35dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=36dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=36dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=36dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=36dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=35dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=36dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=36dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=36dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=35dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=35dB,FreqOffset=0.0 Hz
+Status=Sync,SNR=36dB,FreqOffset=0.0 Hz
+Status=End-of-over at modem frame 334
+Status=Searching
+Status=Sync,SNR=20dB,FreqOffset=1.0 Hz
+```
+
+## Source files
+
+```
+src/
+├── radae/                          Core RADAE C library
+│   ├── rade_api.h / .c             Public API: rade_open, rade_rx, rade_tx, rade_close
+│   ├── rade_ofdm.h / .c            OFDM mod/demod: DFT/IDFT, pilot insertion, cyclic prefix, equalization
+│   ├── rade_rx.h / .c              RADAE receiver: pilot acquisition, OFDM demod, neural decode, sync state machine
+│   ├── rade_tx.h / .c              RADAE transmitter: neural encode, OFDM modulation
+│   ├── rade_acq.h / .c             Pilot-based signal acquisition and frequency/timing synchronisation
+│   ├── rade_bpf.h / .c             700–2300 Hz bandpass FIR filter applied to TX output
+│   ├── rade_dsp.h / .c             DSP primitives: complex arithmetic, Hilbert transform, FFT helpers
+│   ├── rade_enc.h / .c             Neural encoder (GRU + convolution layers)
+│   ├── rade_enc_data.h / .c        Pre-trained encoder network weights (~24 MB, compiled into binary)
+│   ├── rade_dec.h / .c             Neural decoder (GRU + convolution layers)
+│   └── rade_dec_data.h / .c        Pre-trained decoder network weights (~23 MB, compiled into binary)
+│
+├── radae_top/                      C++ wrappers around the RADAE C library
+│   ├── rade_core.h                 Shared types and constants
+│   ├── rade_constants.h            Auto-generated neural network dimensions (latent size, frame count, etc.)
+│   ├── rade_decoder.h / .cpp       RadaeDecoder: RX pipeline thread (capture → Hilbert → RADE Rx → FARGAN → playback)
+│   ├── rade_encoder.h / .cpp       RadaeEncoder: TX pipeline thread (mic → LPCNet features → RADE Tx → radio out)
+│   └── audio_passthrough.h / .cpp  AudioPassthrough: raw audio loopback with RMS/FFT metering for passthrough mode
+│
+├── audio/                          Platform-neutral audio I/O abstraction
+│   ├── audio_stream.h              AudioStream base class (read / write / list devices interface)
+│   ├── audio_input.h / .cpp        AudioInput: background capture thread with per-channel level metering
+│   ├── audio_stream_alsa.cpp       ALSA backend (Linux)
+│   ├── audio_stream_pulse.cpp      PulseAudio backend (Linux default)
+│   └── audio_stream_portaudio.cpp  PortAudio backend (macOS default; also available on Linux)
+│
+├── gui/                            GTK3 graphical user interface
+│   ├── main.cpp                    Program entry point; creates GTK application, initialises globals
+│   ├── gui_activate.h / .cpp       GTK "activate" handler: builds window, widgets, and layout from code
+│   ├── gui_app_state.h             Declarations of all shared UI/state globals (decoder, encoder, widgets, etc.)
+│   ├── gui_callbacks.h / .cpp      GTK signal handlers: button clicks, device selection, mode toggles, window close
+│   ├── gui_controls.h / .cpp       Higher-level helpers: start/stop decoder/encoder, refresh status, update rig
+│   ├── gui_config.h / .cpp         Settings load/save to ~/.config/radae-decoder.conf
+│   ├── meter_widget.h / .cpp       Custom GtkDrawingArea bar-meter: logarithmic dB scale, peak-hold with decay
+│   ├── spectrum_widget.h / .cpp    Custom GtkDrawingArea spectrum display (0–4 kHz, frequency labels)
+│   ├── waterfall_widget.h / .cpp   Custom GtkDrawingArea waterfall: scrolling spectrogram history
+│   └── rig_control.h / .cpp        Hamlib wrapper: enumerates rig models and serial ports, sends frequency commands
+│
+├── network/                        FreeDV Reporter integration
+│   ├── socket_io.h / .cpp          Minimal Socket.IO v4 client over IXWebSocket (Engine.IO handshake, event routing)
+│   └── freedv_reporter.h / .cpp    FreeDVReporter: connects to FreeDV Reporter server, tracks remote stations, handles QSY requests
+│
+├── eoo/                            End-of-over callsign codec
+│   └── EooCallsignCodec.h / .cpp   Encodes/decodes operator callsign in the RADE EOO frame using LDPC + CRC
+│
+├── wav/                            WAV file recording
+│   └── wav_recorder.h / .cpp       WavRecorder: thread-safe PCM S16 WAV writer with correct header management
+│
+├── tools/                          Command-line utilities
+│   ├── rade_demod.cpp              File tool: WAV RADAE audio in → decoded speech WAV out
+│   ├── rade_modulate.cpp           File tool: speech WAV in → RADAE OFDM WAV out
+│   ├── radae_headless.cpp          Headless transceiver: full RX or TX pipeline with no GUI, config-file driven
+│   ├── radae_rx.c                  Streaming receiver: IQ float32 on stdin → LPCNet features on stdout
+│   ├── radae_tx.c                  Streaming transmitter: LPCNet features on stdin → IQ float32 on stdout
+│   ├── real2iq.c                   Converts real baseband float32 to complex IQ via Hilbert transform
+│   ├── webrx_rade_decode.c         OpenWebRX plugin: S16 8 kHz mono in → decoded S16 8 kHz mono out
+│   └── lpcnet_demo.c               LPCNet vocoder demo (feature extraction and FARGAN synthesis, Mozilla code)
+│
+└── yyjson/                         Embedded JSON library (MIT licence)
+    └── yyjson.h / .c               Fast JSON parser and serialiser used for FreeDV Reporter event handling
 ```
 
 ## Credits
@@ -495,6 +633,7 @@ Test:
 - Built with GTK 3 ([gtk.org](https://www.gtk.org/))
 - Audio I/O via ALSA / PulseAudio / PortAudio (selectable at build time)
 - Thanks David Rowe for help and encouragement.
+- Thanks Stanislav Lechev [0xAF] for contributing the debian .deb package build
 
 ---
 

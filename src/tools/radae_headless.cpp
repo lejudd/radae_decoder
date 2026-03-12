@@ -43,9 +43,9 @@
 #include <fstream>
 #include <sstream>
 
-#include "rade_decoder.h"
-#include "rade_encoder.h"
-#include "audio_input.h"
+#include "../src/radae_top/rade_decoder.h"
+#include "../src/radae_top/rade_encoder.h"
+#include "../src/audio/audio_input.h"
 
 /* ── Configuration structure ──────────────────────────────────────────── */
 

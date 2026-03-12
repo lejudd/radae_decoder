@@ -47,8 +47,8 @@
 #include <math.h>
 #include <getopt.h>
 
-#include "rade_api.h"
-#include "rade_dsp.h"
+#include "../radae/rade_api.h"
+#include "../radae/rade_dsp.h"
 #include "fargan.h"
 #include "lpcnet.h"
 
@@ -148,7 +148,7 @@ int main(int argc, char *argv[]) {
     int n_features_out = rade_n_features_in_out(r);
     int n_eoo_bits     = rade_n_eoo_bits(r);
 
-    if (verbose >= 1)
+    if (verbose >= 2)
         fprintf(stderr, "nin_max: %d  n_features_out: %d  n_eoo_bits: %d\n",
                 nin_max, n_features_out, n_eoo_bits);
 
@@ -194,8 +194,8 @@ int main(int argc, char *argv[]) {
         int has_eoo = 0;
         int n_out   = rade_rx(r, feat_buf, &has_eoo, eoo_buf, iq_buf);
 
-        if (has_eoo && verbose >= 1)
-            fprintf(stderr, "End-of-over at modem frame %d\n", mf_count);
+        if (has_eoo)
+            fprintf(stderr, "Status=End-of-over at modem frame %d\n", mf_count);
 
         /* Re-init FARGAN when sync is newly acquired so we get a clean
            warm-up for each transmission. */
@@ -206,6 +206,16 @@ int main(int argc, char *argv[]) {
             cont_frames  = 0;
         }
         was_synced = synced;
+        
+        if (mf_count % 20 == 0) {
+            if(synced) {
+                fprintf(stderr, "Status=Sync,SNR=%ddB,FreqOffset=%.1f Hz\n",
+                    rade_snrdB_3k_est(r), rade_freq_offset(r));
+            } else {
+                fprintf(stderr, "Status=Searching\n");
+            }
+        }
+        
 
         if (n_out > 0) {
             vld_count++;
@@ -256,7 +266,7 @@ int main(int argc, char *argv[]) {
         mf_count++;
     }
 
-    if (verbose >= 1)
+    if (verbose > 1)
         fprintf(stderr, "Modem frames: %d   valid: %d\n", mf_count, vld_count);
 
     /* ---- cleanup ---- */

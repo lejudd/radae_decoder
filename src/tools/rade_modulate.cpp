@@ -52,14 +52,14 @@
 #include <string>
 #include <vector>
 
-#include "rade_api.h"
-#include "rade_dsp.h"
+#include "../radae/rade_api.h"
+#include "../radae/rade_dsp.h"
 extern "C" {
 #include "lpcnet.h"
 #include "arch.h"
 #include "cpu_support.h"
 }
-#include "EooCallsignDecoder.hpp"
+#include "../src/eoo/EooCallsignCodec.h"
 
 /* ---- WAV file I/O ---- */
 
