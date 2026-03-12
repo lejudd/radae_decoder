@@ -165,8 +165,32 @@ target_include_directories(radae_headless PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+add_executable(radae_trx
+    src/tools/radae_trx.cpp
+    src/audio/audio_input.cpp
+    src/radae_top/rade_decoder.cpp
+    src/radae_top/rade_encoder.cpp
+    src/eoo/EooCallsignCodec.cpp
+    src/wav/wav_recorder.cpp
+    ${AUDIO_BACKEND_SRC}
+)
+target_link_libraries(radae_trx
+    rade
+    opus
+    m
+    ${AUDIO_BACKEND_LIBS}
+    Threads::Threads
+)
+target_include_directories(radae_trx PRIVATE
+    ${AUDIO_BACKEND_INCS}
+    ${OPUS_SOURCE_DIR}/dnn
+    ${OPUS_SOURCE_DIR}/celt
+    ${OPUS_SOURCE_DIR}/include
+    ${OPUS_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
 # put all the command line tools in a tools directory
-set_target_properties(lpcnet_demo radae_tx radae_rx real2iq rade_demod rade_modulate webrx_rade_decode radae_headless PROPERTIES
+set_target_properties(lpcnet_demo radae_tx radae_rx real2iq rade_demod rade_modulate webrx_rade_decode radae_headless radae_trx PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools
 )
 
