@@ -55,6 +55,8 @@ struct Config {
     std::string frommic;
     std::string tospeaker;
     std::string call;
+    float tx_level = 1.0f;
+    bool bpf = true;
 };
 
 /* ── Global flag for signal handling ──────────────────────────────────── */
@@ -326,7 +328,7 @@ int main(int argc, char *argv[]) {
         encoder.start();
 
         encoder.set_callsign(config.call);
-        encoder.set_bpf_enabled(true);
+        encoder.set_bpf_enabled(config.bpf);
 
         fprintf(stderr, "Running... Press Ctrl+C to stop\n");
         while (g_running && encoder.is_running()) {
