@@ -114,38 +114,17 @@ bool load_config(const std::string& path = "radae_headless.conf") {
         if (line.empty() || line[0] == '#') continue;
         auto eq = line.find('=');
         if (eq == std::string::npos) continue;
-        std::string k = line.substr(0, eq);
-        std::string v = line.substr(eq+1);
-        if (k == "fromradio")    config.fromradio = v;
-        else if (k == "tospeaker") config.tospeaker = v;
-        else if (k == "frommic")   config.frommic = v;
-        else if (k == "toradio")   config.toradio = v;
-        else if (k == "call")  config.call = v;
-        else if (k == "tx_output_level") config.tx_level = std::stof(v);
-        else if (k == "bpf_enable") config.bpf = (v == "true" || v == "1");
+        std::string key = line.substr(0, eq);
+        std::string value = line.substr(eq+1);
+        if (key == "fromradio")    config.fromradio = value;
+        else if (key == "tospeaker") config.tospeaker = value;
+        else if (key == "frommic")   config.frommic = value;
+        else if (key == "toradio")   config.toradio = value;
+        else if (key == "call")  config.call = value;
+        else if (key == "tx_output_level") config.tx_level = std::stof(value);
+        else if (key == "bpf_enable") config.bpf = (value == "true" || value == "1");
     }
     return true;
-}
-
-void parse_args(int argc, char** argv) {
-    static struct option opts[] = {
-        {"fromradio",  required_argument, nullptr, 'i'},
-        {"tospeaker",  required_argument, nullptr, 'o'},
-        {"frommic",    required_argument, nullptr, 'm'},
-        {"toradio",    required_argument, nullptr, 'r'},
-        {"callsign",   required_argument, nullptr, 'c'},
-        {nullptr, 0, nullptr, 0}
-    };
-    int c;
-    while ((c = getopt_long(argc, argv, "i:o:m:r:c:", opts, nullptr)) != -1) {
-        switch (c) {
-            case 'i': config.fromradio = optarg; break;
-            case 'o': config.tospeaker = optarg; break;
-            case 'm': config.frommic   = optarg; break;
-            case 'r': config.toradio   = optarg; break;
-            case 'c': config.call      = optarg; break;
-        }
-    }
 }
 
 void stop_current() {
@@ -285,7 +264,6 @@ int main(int argc, char** argv) {
     std::cout << " space → toggle RX/TX   t → TX   r → RX   q → quit\n\n";
 
     load_config();
-    parse_args(argc, argv);
 
     TerminalRawMode raw_mode;
 
