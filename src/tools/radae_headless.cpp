@@ -125,6 +125,8 @@ bool parse_config_file(const char* filename, Config& config) {
             config.tospeaker = value;
         } else if (key == "call") {
             config.call = value;
+        } else if (key == "bpf_enable") {
+            config.bpf = value;
         }
     }
 
