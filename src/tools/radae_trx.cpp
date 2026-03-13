@@ -157,7 +157,7 @@ void stop_current() {
 }
 
 bool start_worker() {
-    std::cout << "Starting " << (g_is_tx ? "TX" : "RX") << " worker...\n";
+    std::cout << "Starting " << (g_is_tx ? "TX" : "RX") << "...\n";
 
     g_worker_thread = std::thread([]() {
         if (g_is_tx) {
@@ -166,13 +166,11 @@ bool start_worker() {
             encoder.set_bpf_enabled(config.bpf);
             encoder.set_callsign(config.call);
 
-            fprintf(stderr, "Opening audio devices...\n");
             if (!encoder.open(config.frommic, config.toradio)) {
                 fprintf(stderr, "Error: Failed to open encoder devices\n");
                 g_quit = true;
             }
 
-            fprintf(stderr, "Starting encoder...\n");
             encoder.start();
 
             while (!g_quit) {
@@ -182,22 +180,18 @@ bool start_worker() {
                 fprintf(stderr, "\rInput: %.2f  Output: %.2f  ", input_level, output_level);
                 fflush(stderr);
             }
-            fprintf(stderr, "\n");
 
-            fprintf(stderr, "Stopping encoder...\n");
             encoder.stop();
             encoder.close();
 
         } else {
             RadaeDecoder decoder;
 
-            fprintf(stderr, "Opening audio devices...\n");
             if (!decoder.open(config.fromradio, config.tospeaker)) {
                 fprintf(stderr, "Error: Failed to open decoder devices\n");
                 g_quit = true;
             }
 
-            fprintf(stderr, "Starting decoder...\n");
             decoder.start();
 
             while (!g_quit) {
@@ -208,14 +202,13 @@ bool start_worker() {
                 float freq_offset = decoder.freq_offset();
                 float input_level = decoder.get_input_level();
                 float output_level = decoder.get_output_level_left();
+                std::string last_callsign = decoder.last_callsign();
 
-                fprintf(stderr, "\r%s SNR: %.1f dB  Freq: %+.1f Hz  In: %.2f  Out: %.2f  ",
-                        synced ? "SYNC" : "----", snr, freq_offset, input_level, output_level);
+                fprintf(stderr, "\r%s SNR: %.1f dB  Freq: %+.1f Hz  In: %.2f  Out: %.2f  Last Call: %s ",
+                        synced ? "SYNC" : "----", snr, freq_offset, input_level, output_level, last_callsign.c_str());
                 fflush(stderr);
             }
-            fprintf(stderr, "\n");
 
-            fprintf(stderr, "Stopping decoder...\n");
             decoder.stop();
             decoder.close();
         }
@@ -319,7 +312,7 @@ int main(int argc, char** argv) {
 
     stop_current();
 
-  rade_finalize();
+    rade_finalize();
     audio_terminate();
 
     std::cout << "\nDone.\n";
