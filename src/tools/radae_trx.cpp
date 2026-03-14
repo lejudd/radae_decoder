@@ -121,7 +121,7 @@ bool load_config(const std::string& path = "radae_headless.conf") {
         else if (key == "frommic")   config.frommic = value;
         else if (key == "toradio")   config.toradio = value;
         else if (key == "call")  config.call = value;
-        else if (key == "tx_output_level") config.tx_level = std::stof(value);
+        else if (key == "tx_level") config.tx_level = std::stof(value);
         else if (key == "bpf_enable") config.bpf = (value == "true" || value == "1");
     }
     return true;
