@@ -73,6 +73,7 @@ struct Config {
     std::string tospeaker;
     std::string call;
     float tx_level = 1.0f;
+    float mic_level = 1.0f;
     bool bpf = true;
 };
 
@@ -122,6 +123,7 @@ bool load_config(const std::string& path = "radae_headless.conf") {
         else if (key == "toradio")   config.toradio = value;
         else if (key == "call")  config.call = value;
         else if (key == "tx_level") config.tx_level = std::stof(value);
+        else if (key == "mic_level") config.mic_level = std::stof(value);
         else if (key == "bpf_enable") config.bpf = (value == "true" || value == "1");
     }
     return true;
@@ -144,6 +146,9 @@ bool start_worker() {
 
             encoder.set_bpf_enabled(config.bpf);
             encoder.set_callsign(config.call);
+//            encoder.set_tx_scale(20000.0);    // Why does 20000 sound about the same as not having this at all?
+//            encoder.set_tx_scale(config.tx_level);
+//            encoder.set_mic_gain(config.mic_level);
 
             if (!encoder.open(config.frommic, config.toradio)) {
                 fprintf(stderr, "Error: Failed to open encoder devices\n");
